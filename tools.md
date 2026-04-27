@@ -178,6 +178,7 @@ Python modules that generate output. Import from `displays` package.
 | **research** | `show_research(research_dir=)` | Research state narrative + d3 dependency graph |
 | **assumptions** | `show_assumptions(assumptions=, from_research=, title=, name=)` | Surface load-bearing assumptions for the human to check (status badges + optional why) |
 | **claims_status** | `show_claims_status(title=, name=)` | Verification timeline — claim → verdict (pending pulses, verified greens, failed reds) |
+| **questions** | `show_questions(questions, name=, title=, intro=)` / `read_answers(name=)` / `wait_for_answers(name=, timeout=)` | Flexible questionnaire — the user fills it in the display panel and Submit writes JSON to `workspace/research/questions-<name>/answers.json`. Question types: `single`, `multi`, `text`, `textarea`, `number`, `slider`, `scale`, `yesno`. Per-question fields: `id`, `label`, `hint`, `placeholder`, `load_bearing`. Group questions with `[{'group': 'Title', 'questions': [...]}]`. |
 | **autoresearch** | `show_autoresearch(research_dir=)` | AutoResearch experiment dashboard (metric chart, kept/reverted log) |
 | **page** | `write_page(body, head=, body_attrs=)` | Shared template — base for custom display addons |
 | **clear** | `clear()` / `clear_display(name)` / `cleanup_displays(keep=[...])` | Remove all output files / a named tab / everything except listed stems (keeps `research` by default) |

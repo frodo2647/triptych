@@ -15,6 +15,7 @@ from .research import show_research
 from .progress import show_progress
 from .assumptions import show_assumptions
 from .claims_status import show_claims_status
+from .questions import show_questions, read_answers, wait_for_answers
 from .derivation import show_derivation
 from .autoresearch import show_autoresearch
 from .circuitjs import show_circuitjs_waveform, show_circuitjs_bode
