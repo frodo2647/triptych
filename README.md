@@ -67,7 +67,22 @@ Everything else (verifier, watcher, domain mentors, dozens of methodology skills
 
 ## Quick start
 
-### Option 1: GitHub Codespaces (zero install)
+### Option 1: One-shot script (easiest local install)
+
+Prerequisites: Node.js 18+, Python 3.10+, [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code).
+
+```bash
+git clone https://github.com/frodo2647/triptych.git
+cd triptych
+```
+
+Then:
+- **Windows:** double-click `setup.bat` (or run it from a terminal)
+- **macOS/Linux:** `./setup.sh`
+
+The script installs dependencies, starts the server, and opens your browser to `http://localhost:3000`. Press `Ctrl+C` to stop.
+
+### Option 2: GitHub Codespaces (zero install)
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/frodo2647/triptych)
 
@@ -76,7 +91,7 @@ Everything else (verifier, watcher, domain mentors, dozens of methodology skills
 3. Wait for the environment to build (a couple of minutes)
 4. Open port 3000 when prompted
 
-### Option 2: Docker (local, no dependency management)
+### Option 3: Docker (local, no dependency management)
 
 ```bash
 git clone https://github.com/frodo2647/triptych.git
@@ -87,7 +102,7 @@ docker compose up
 
 Open `http://localhost:3000`.
 
-### Option 3: Native (if you want to hack on it)
+### Option 4: Manual native install (if you want to hack on it)
 
 Prerequisites: Node.js 18+, Python 3.10+, [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code). Run `npm run preflight` if you want to verify them automatically.
 
