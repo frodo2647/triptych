@@ -1,0 +1,22 @@
+/* ── Triptych Chrome Geometry ─────────────────────────────
+   Chrome-specific tokens. Sized for the topbar, tabstrip, and
+   seams of the three-panel shell. Not meant to be inherited
+   by displays. Import AFTER theme.css.
+   ────────────────────────────────────────────────────────── */
+
+:root {
+  --topbar-h:    32px;
+  --tabstrip-h:  30px;
+  --seam-w:      1px;
+  --seam-hit:    10px;
+
+  /* Pane toggle badge */
+  --pane-badge-h:    22px;
+  --pane-badge-w:    52px;
+  --pane-badge-r:    var(--r-sm);
+  --pane-badge-overlap: 4px;
+}
+
+body {
+  overflow: hidden;
+}

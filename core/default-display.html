@@ -71,16 +71,11 @@
       cursor: zoom-out;
     }
 
-    /* Tab bar for multiple files */
+    /* Tab bar — hidden in v2 (shell hosts tabs at the panel level) */
     .tab-bar {
-      display: none;
-      gap: 1px;
-      background: var(--void);
-      border-bottom: 1px solid var(--seam);
-      overflow-x: auto;
-      flex-shrink: 0;
+      display: none !important;
     }
-    .tab-bar.visible { display: flex; }
+    .tab-bar.visible { display: none !important; }
     .tab {
       padding: 5px 12px;
       font-size: 10px;
@@ -342,9 +337,22 @@
         checkOutput();
         return;
       }
-      // Keybind routing from parent shell
-      if (data && typeof data === 'object' && data.type === 'triptych-key') {
-        handleKey(data.action);
+      if (data && typeof data === 'object') {
+        if (data.type === 'triptych-key') {
+          handleKey(data.action);
+          return;
+        }
+        if (data.type === 'triptych-display-reload') {
+          lastKey = null;
+          checkOutput();
+          return;
+        }
+        if (data.type === 'triptych-display-select' && data.name) {
+          // Shell-driven tab selection. Resolve by name, switch by stem.
+          const file = currentFiles.find(f => f.name === data.name);
+          if (file) switchTo(file.stem);
+          return;
+        }
       }
     });
 

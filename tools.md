@@ -6,39 +6,66 @@ Quick reference for all available addons and capabilities. For principles and sy
 
 All visual design flows from `core/theme.css` — the single source of truth. Change tokens there and every panel inherits. Design context is in `.impeccable.md`.
 
-### Theming (`core/theme.css`)
+### Theming (`core/theme.css` + `core/chrome.css`)
 
-Fonts are loaded via `@import` in theme.css — no need for `<link>` tags in workspace files. Every workspace HTML file should import theme.css: `<link rel="stylesheet" href="/core/theme.css">`.
+Fonts are loaded via `@import` in theme.css — no need for `<link>` tags in workspace files. Every workspace HTML file should import theme.css: `<link rel="stylesheet" href="/core/theme.css">`. The shell additionally imports `chrome.css` for chrome-only geometry (topbar / tabstrip / seam sizes).
 
-| Token | Value | Use |
-|-------|-------|-----|
-| `--void` | `#151210` | Deepest background (panel content) |
-| `--surface` | `#1e1a16` | Elevated surface (topbar, toolbars) |
-| `--surface-2` | `#282320` | Higher elevation (buttons, badges) |
-| `--surface-3` | `#322c26` | Highest elevation (hover states) |
-| `--border` | `#3a332b` | Borders and dividers |
-| `--text-hi` | `#d8d0c8` | Primary text |
-| `--text-mid` | `#968e84` | Secondary text |
-| `--text-dim` | `#685f56` | Tertiary/disabled text |
-| `--accent` | `#cc7a58` | Accent (Claude orange, muted) |
-| `--font` | Archivo | UI chrome, labels, body |
-| `--font-mono` | JetBrains Mono | Terminal, code editor |
+| Token | Dark | Light | Use |
+|-------|------|-------|-----|
+| `--void` | `#161514` | `#f5f1ea` | Deepest background (panel content) |
+| `--chrome` | `#0e0d0c` | `#ebe6dd` | Topbar / xterm frame |
+| `--surface` | `#1c1a18` | `#fbf8f2` | Popovers, command bar |
+| `--surface-2` | `#232020` | `#ffffff` | Hover states |
+| `--surface-3` | `#2c2826` | `#f0eadc` | Higher hover states |
+| `--hairline` | `#232120` | `#d8cfc0` | Borders / dividers |
+| `--text-hi` | `#ece7e0` | `#1f1a14` | Primary text |
+| `--text-mid` | `#948b81` | `#5e564b` | Secondary text |
+| `--text-dim` | `#5a534c` | `#8d8273` | Tertiary text |
+| `--accent` | `#f08355` | `#d96640` | Triptych orange (focus, action) |
+| `--font` | Inter Tight | – | UI chrome, body |
+| `--font-serif` | Fraunces | – | Project mark, large display |
+| `--font-mono` | JetBrains Mono | – | Tabs, terminal, code |
 
-Backward-compat aliases: `--text` = `--text-hi`, `--text-2` = `--text-mid`, `--text-3` = `--text-dim`, `--chrome` = `--surface`, `--seam` = `--border`.
+Light theme activates via `[data-theme="light"]` on `<html>`. The shell's `applyTheme()` sets it on the parent and recursively propagates to every same-origin iframe (including nested ones), then pokes `term.options.theme` + `.xterm-viewport` background for xterm.
 
-### Shell Chrome (`core/shell.css`, `core/shell.html`, `core/shell.js`)
+**Legacy aliases** preserved at the bottom of theme.css so addons don't need edits: `--text`, `--text-2`, `--text-3`, `--border`, `--seam`, `--accent-surface`, `--green`, `--red`, `--yellow`, `--blue`, `--space-xs/sm/md/lg/xl/2xl/3xl`, `--ease-out`, `--duration-fast`, `--duration-normal`, `--transition`.
 
-The outer frame — topbar with panel tabs, seam dividers, panel grid.
+### Shell Chrome (`core/shell.html`, `core/shell.js`, `core/chrome.css`)
 
-**Panel toggle**: Click a tab to hide its panel. A "+" restore button appears at the collapsed position. Panels always reopen in order (workspace left, display center, terminal right).
+The outer frame — slim topbar (project mark + sync dot + help + settings), three panels each with a `[name]`-style tabstrip and a floating W/D/T pane-toggle badge that visually overhangs into the topbar. Closing a pane leaves a dashed "ghost" reopener in the topbar.
 
-**Keyboard shortcuts**: `Alt+1` workspace, `Alt+2` display, `Alt+3` chat.
+**Tabs**:
+- **Workspace**: multi-tab, one iframe per open file. The `+` button opens a fresh Files tab. Clicking a file from the Files browser **replaces the active tab** (so opening multiple files = `+ → click → + → click`). Hover the active tab to reveal the close `×`.
+- **Display**: shell-driven from `/api/output-pool` polling (1500 ms). Click a tab to swap content; the inner `default-display.html` iframe receives a `triptych-display-select` postMessage. Display tabs are agent-only (no `+` button).
+- **Terminal**: shell-driven from `sessionsOrder`. `+` creates a session (`session-create`), hover-`×` kills it (`session-kill`); the server refuses to kill the last session.
 
-**Fullscreen**: Button in topbar-right uses the browser Fullscreen API. Escape exits. Mouse near top edge peeks the topbar.
+**Pane toggles** (W / D / T badges): Click to hide a pane. A dashed ghost appears in the topbar; click it to reopen. Last visible pane refuses to close.
 
-**Seam drag**: Pointer drag resizes adjacent panels. Labels track panel widths. Min panel width: 80px. Terminal fit is debounced during drag.
+**Seam drag**: `flex-grow` proportion-preserving. Drag either seam to resize. Panel min width 140 px. xterm refit is debounced.
 
-**Icons**: Grid (workspace), monitor (display), terminal prompt (chat), corner brackets (fullscreen).
+**Command bar** (`⌘K` mac / `Ctrl+K` win): bottom-anchored search across open workspace tabs, display files, and terminal sessions. `⇧⏎` sends the typed text straight to the active terminal session. `Esc` closes.
+
+**Settings popover** (gear icon): theme toggle (`dark` / `light`). Persisted in `localStorage`.
+
+**Help popover** (`?` icon): hotkey reference. Auto-adapts: shows `⌘K` + `⌥` on macOS, `Ctrl+K` + `Alt` on Windows / Linux.
+
+**Hotkeys** (cross-platform via `e.code`, so macOS Option+letter dead-keys don't break):
+
+| Combo | Action |
+|---|---|
+| `Alt+1` / `Alt+2` / `Alt+3` | Toggle workspace / display / terminal |
+| `Alt+Q` / `Alt+W` | Prev / next tab in focused pane |
+| `Alt+A` / `Alt+S` (or `Alt+[` / `Alt+]`) | Cycle pane focus |
+| `Alt+N` / `Alt+X` | New / kill claude session (terminal pane) |
+| `⌘K` / `Ctrl+K` | Open command bar |
+| `Esc` | Close popover / command bar |
+| `⇧⏎` (in `⌘K`) | Send query to terminal |
+
+On macOS, `Alt` = `⌥` (Option). Detection uses physical key codes (`KeyQ`, `Digit1`, etc.) so the dead-key Option behavior doesn't intercept shortcuts.
+
+**Focus model**: A click anywhere inside a pane (including deeply nested iframes) focuses that pane. The focused pane gets a thin orange accent line at the top and is what hotkeys like `Alt+Q/W/N/X` route to. xterm-side focus follows when the terminal pane is focused.
+
+**v1 backups** at `core/{shell.v1.html, shell.v1.css, shell.v1.js, theme.v1.css}` — fast revert path: `mv core/shell.v1.html core/shell.html`, etc.
 
 ### Display Content
 

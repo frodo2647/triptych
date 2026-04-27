@@ -1,154 +1,464 @@
-/* ── Triptych Shell ──────────────────────────────────────────
-   Top bar with tab buttons. Panels below. No framework.
-   ──────────────────────────────────────────────────────────── */
+/* ── Triptych Shell — v2 ──────────────────────────────────
+   Three-panel chrome: pane toggles, ghost reopeners, tabs,
+   seam drag, popovers, theme toggle, command bar, toasts,
+   hotkeys. Plus: WS protocol, xterm session multiplexing,
+   multi-tab workspace, hoisted display tabs.
+   ──────────────────────────────────────────────────────── */
 
 (function () {
   'use strict';
 
-  // ── Parse URL params ────────────────────────────────────
-  const params = new URLSearchParams(location.search);
-  const showParam = (params.get('show') || 'all').toLowerCase();
-  const ALL_PANELS = ['workspace', 'display', 'terminal'];
-  const visiblePanels = showParam === 'all'
-    ? [...ALL_PANELS]
-    : showParam.split(',').map(s => s.trim()).filter(p => ALL_PANELS.includes(p));
-
-  if (visiblePanels.length === 0) visiblePanels.push(...ALL_PANELS);
-
-  // ── DOM refs ────────────────────────────────────────────
+  /* ── Globals & DOM refs ──────────────────────────────── */
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => [...document.querySelectorAll(sel)];
-  const panels = {};
-  const seams = {};
-  const tabBtns = {};
-  const panelLabels = {};
 
-  ALL_PANELS.forEach(name => {
-    panels[name] = $(`.panel[data-panel="${name}"]`);
-    tabBtns[name] = $(`.tab-btn[data-panel="${name}"]`);
-    panelLabels[name] = $(`.panel-label[data-panel="${name}"]`);
-  });
+  const isMac = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
+  const cmdKeyLabel = isMac ? '⌘K' : 'Ctrl+K';
+  const altKeyLabel = isMac ? '⌥' : 'Alt';
+  $('#cmd-hint-key').textContent = cmdKeyLabel;
+  $('#hk-cmd').textContent = cmdKeyLabel;
+  // Swap "Alt" → "⌥" labels on Mac in the help popover hotkey table
+  if (isMac) {
+    document.querySelectorAll('#help-menu .hk-table kbd').forEach(kbd => {
+      if (kbd.textContent === 'Alt') kbd.textContent = '⌥';
+    });
+  }
 
-  $$('.seam').forEach(el => {
-    const key = el.dataset.left + '-' + el.dataset.right;
-    seams[key] = el;
-  });
+  const PANEL_NAMES = ['workspace', 'display', 'terminal'];
+  const panels = PANEL_NAMES.map(name => $(`.panel[data-panel="${name}"]`));
+  const seams  = $$('.seam');
+  const stage  = $('#stage');
+  const ghostToggles = $('#ghost-toggles');
+  const toastEl = $('#toast');
+  const cmdBar = $('#cmd-bar');
+  const cmdOverlay = $('#cmd-overlay');
+  const cmdInput = $('#cmd-input');
+  const cmdResults = $('#cmd-results');
+  const sendHint = $('#send-hint');
 
-  // ── Show/hide panels ───────────────────────────────────
-  function applyLayout() {
-    ALL_PANELS.forEach(name => {
-      const show = visiblePanels.includes(name);
-      panels[name].classList.toggle('hidden', !show);
-      tabBtns[name].classList.toggle('active', show);
-      tabBtns[name].classList.toggle('inactive', !show);
-      tabBtns[name].setAttribute('aria-pressed', show);
-      // Clear inline flex on toggle so panels return to equal distribution
-      if (!panels[name].style.flex || !show) {
-        panels[name].style.flex = '';
+  /* ── Layout (flex-grow proportions) ──────────────────── */
+  const flex = panels.map(() => 1);
+  function applyFlex() {
+    panels.forEach((p, i) => {
+      if (!p.classList.contains('closed')) p.style.flexGrow = flex[i];
+    });
+  }
+  applyFlex();
+
+  /* ── Toast ───────────────────────────────────────────── */
+  let toastTimer;
+  function showToast(html) {
+    toastEl.innerHTML = html;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  }
+
+  /* ── Pane focus ──────────────────────────────────────── */
+  let focusedIdx = panels.findIndex(p => p.classList.contains('focused'));
+  if (focusedIdx < 0) focusedIdx = 1;
+
+  function focusPanel(idx, silent = false) {
+    if (idx < 0 || idx >= panels.length) return;
+    if (panels[idx].classList.contains('closed')) return;
+    panels.forEach(p => p.classList.remove('focused'));
+    panels[idx].classList.add('focused');
+    focusedIdx = idx;
+    if (panels[idx].dataset.panel === 'terminal' && term) {
+      try { term.focus(); } catch {}
+    }
+    if (!silent) {
+      showToast(`focus → <span class="accent">${panels[idx].dataset.panel}</span>`);
+    }
+  }
+  panels.forEach((p, i) => {
+    p.addEventListener('mousedown', e => {
+      if (e.target.closest('.tab-x')) return;
+      focusPanel(i, true);
+    });
+    p.addEventListener('mouseenter', () => {
+      if (!document.hasFocus() || document.activeElement === document.body) {
+        focusPanel(i, true);
       }
     });
+  });
 
-    // Show seams only between adjacent visible panels
-    Object.entries(seams).forEach(([key, el]) => {
-      const [left, right] = key.split('-');
-      const leftVisible = visiblePanels.includes(left);
-      const rightVisible = visiblePanels.includes(right);
-      const leftIdx = ALL_PANELS.indexOf(left);
-      const rightIdx = ALL_PANELS.indexOf(right);
-      const between = ALL_PANELS.slice(leftIdx + 1, rightIdx);
-      const hasVisibleBetween = between.some(p => visiblePanels.includes(p));
-      el.classList.toggle('hidden', !(leftVisible && rightVisible && !hasVisibleBetween));
+  /* ── Counts and ghost toggles ────────────────────────── */
+  function refreshCounts() {
+    panels.forEach(p => {
+      const c = p.querySelectorAll('.tabstrip .tab').length;
+      const cEl = p.querySelector('.pt-count');
+      if (cEl) cEl.textContent = c;
     });
+  }
+  function updateEmptyStates() {
+    panels.forEach(p => {
+      const name = p.dataset.panel;
+      const content = p.querySelector('.panel-content');
+      const tabs = p.querySelectorAll('.tabstrip .tab');
+      if (name === 'workspace') {
+        const hasActive = !!p.querySelector('.panel-content > .view.active:not([data-view="ws-empty"])');
+        const empty = content.querySelector('.view[data-view="ws-empty"]');
+        if (empty) empty.classList.toggle('active', tabs.length === 0 && !hasActive);
+      }
+    });
+  }
 
-    const url = new URL(location);
-    if (visiblePanels.length === ALL_PANELS.length) {
-      url.searchParams.delete('show');
+  const GHOST_DEFS = {
+    workspace: { letter: 'W', icon: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4a1 1 0 011-1h3.5l1 1.2H13a1 1 0 011 1V12a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>' },
+    display:   { letter: 'D', icon: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="9" rx="1"/><path d="M6 14h4M8 12v2"/></svg>' },
+    terminal:  { letter: 'T', icon: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4l4 4-4 4M9 12h4"/></svg>' },
+  };
+  function refreshGhostToggles() {
+    ghostToggles.innerHTML = '';
+    panels.forEach(p => {
+      if (!p.classList.contains('closed')) return;
+      const name = p.dataset.panel;
+      const def = GHOST_DEFS[name];
+      const btn = document.createElement('button');
+      btn.className = 'ghost-toggle';
+      btn.dataset.pane = name;
+      btn.title = `Open ${name} pane`;
+      btn.innerHTML = `<span class="pt-icon">${def.icon}</span><span class="pt-letter">${def.letter}</span>`;
+      btn.addEventListener('click', () => togglePane(name));
+      ghostToggles.appendChild(btn);
+    });
+    positionGhosts();
+  }
+  function positionGhosts() {
+    const ghosts = [...ghostToggles.querySelectorAll('.ghost-toggle')];
+    if (!ghosts.length) return;
+    const leftAnchor = 180;
+    const rightAnchor = 110;
+    const wsClosed   = panels[0].classList.contains('closed');
+    const dispClosed = panels[1].classList.contains('closed');
+    const termClosed = panels[2].classList.contains('closed');
+    ghosts.forEach(g => {
+      const name = g.dataset.pane;
+      g.style.left = ''; g.style.right = ''; g.style.transform = '';
+      if (name === 'workspace') g.style.left = leftAnchor + 'px';
+      else if (name === 'terminal') g.style.right = rightAnchor + 'px';
+      else if (name === 'display') {
+        if (wsClosed && !termClosed) g.style.left = (leftAnchor + 70) + 'px';
+        else if (termClosed && !wsClosed) g.style.right = (rightAnchor + 70) + 'px';
+        else { g.style.left = '50%'; g.style.transform = 'translateX(-50%)'; }
+      }
+    });
+  }
+
+  /* ── Pane toggle ─────────────────────────────────────── */
+  function togglePane(name) {
+    const panel = panels.find(p => p.dataset.panel === name);
+    if (!panel) return;
+    if (panel.classList.contains('closed')) {
+      panel.classList.remove('closed');
+      focusPanel(panels.indexOf(panel), true);
+      showToast(`open → <span class="accent">${name}</span>`);
     } else {
-      url.searchParams.set('show', visiblePanels.join(','));
+      const visible = panels.filter(p => !p.classList.contains('closed'));
+      if (visible.length <= 1) { showToast(`can't close last pane`); return; }
+      panel.classList.add('closed');
+      if (panel.classList.contains('focused')) {
+        const next = panels.find(p => !p.classList.contains('closed'));
+        if (next) focusPanel(panels.indexOf(next), true);
+      }
+      showToast(`hide → <span class="accent">${name}</span>`);
     }
-    history.replaceState(null, '', url);
-
-    syncLabels();
-
-    if (visiblePanels.includes('terminal')) {
+    refreshGhostToggles();
+    applyFlex();
+    if (name === 'terminal' || !panel.classList.contains('closed')) {
       setTimeout(fitTerminal, 50);
     }
-
-    if (visiblePanels.includes('terminal') && !term) {
-      initTerminal();
-    }
   }
-
-  // ── Sync label positions with panels ───────────────────
-  function syncLabels() {
-    ALL_PANELS.forEach(name => {
-      const panel = panels[name];
-      const label = panelLabels[name];
-      if (!visiblePanels.includes(name)) {
-        label.classList.add('collapsed');
-        label.style.flex = '';
-      } else {
-        label.classList.remove('collapsed');
-        // Copy inline flex from panel (if set by seam drag)
-        label.style.flex = panel.style.flex || '';
-      }
+  $$('.pane-toggle').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      togglePane(btn.dataset.toggle);
     });
-  }
-
-  function togglePanel(name) {
-    const idx = visiblePanels.indexOf(name);
-    if (idx !== -1) {
-      if (visiblePanels.length <= 1) return;
-      visiblePanels.splice(idx, 1);
-    } else {
-      visiblePanels.push(name);
-    }
-    applyLayout();
-  }
-
-  // ── Tab button clicks ──────────────────────────────────
-  $$('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => togglePanel(btn.dataset.panel));
   });
 
-  // ── Seam drag (resize) ─────────────────────────────────
-  $$('.seam').forEach(seam => {
-    const isVertical = () => window.innerWidth <= 768;
+  /* ── Tabs (generic) ──────────────────────────────────── */
+  function makeTabEl({ id, name, closeable, kind }) {
+    const tab = document.createElement('button');
+    tab.className = 'tab' + (closeable ? ' closeable' : '');
+    tab.dataset.id = id;
+    if (kind) tab.dataset.kind = kind;
+    tab.innerHTML = `
+      <span class="tab-bracket">[</span>
+      <span class="tab-name">${escapeHtml(name)}</span>
+      <span class="tab-bracket">]</span>
+      ${closeable ? '<span class="tab-x">×</span>' : ''}`;
+    return tab;
+  }
 
-    seam.addEventListener('pointerdown', (e) => {
+  function activateTab(panel, tabId) {
+    const strip = panel.querySelector('.tabstrip');
+    const content = panel.querySelector('.panel-content');
+    strip.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.id === tabId));
+    content.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.dataset.view === tabId));
+    updateEmptyStates();
+  }
+
+  // Wire delegated clicks for each panel's tabstrip
+  panels.forEach(panel => {
+    const strip = panel.querySelector('.tabstrip');
+    if (!strip) return;
+    strip.addEventListener('click', e => {
+      const xBtn = e.target.closest('.tab-x');
+      if (xBtn) {
+        const tab = xBtn.closest('.tab');
+        if (!tab || !tab.classList.contains('closeable')) return;
+        e.stopPropagation();
+        handleTabClose(panel, tab);
+        return;
+      }
+      const tab = e.target.closest('.tab');
+      if (tab) {
+        handleTabClick(panel, tab);
+        focusPanel(panels.indexOf(panel), true);
+        return;
+      }
+      const add = e.target.closest('.tab-add');
+      if (add) handleTabAdd(panel);
+    });
+  });
+
+  function handleTabClick(panel, tab) {
+    const name = panel.dataset.panel;
+    const id = tab.dataset.id;
+    if (name === 'workspace') activateTab(panel, id);
+    else if (name === 'display') {
+      activateTab(panel, 'ds-frame');
+      tab.classList.remove('has-unread');
+      // Re-paint active styling on the clicked tab (activateTab targets ds-frame view, not the tab)
+      panel.querySelectorAll('.tabstrip .tab').forEach(t => t.classList.toggle('active', t === tab));
+      const fname = tab.dataset.fname || tab.querySelector('.tab-name')?.textContent;
+      const dispFrame = panel.querySelector('iframe.panel-frame');
+      if (dispFrame?.contentWindow && fname) {
+        dispFrame.contentWindow.postMessage({ type: 'triptych-display-select', name: fname }, '*');
+      }
+      activeDisplayName = fname || activeDisplayName;
+    }
+    else if (name === 'terminal') {
+      if (id !== activeSessionId) setActiveSession(id);
+    }
+  }
+
+  function handleTabClose(panel, tab) {
+    const name = panel.dataset.panel;
+    const id = tab.dataset.id;
+    if (name === 'workspace') closeWorkspaceTab(id);
+    else if (name === 'terminal') wsSend({ type: 'session-kill', sessionId: id });
+  }
+
+  function handleTabAdd(panel) {
+    const name = panel.dataset.panel;
+    if (name === 'workspace') openWorkspaceFM();
+    else if (name === 'terminal') wsSend({ type: 'session-create' });
+  }
+
+  /* ── Workspace multi-tab ─────────────────────────────── */
+  // openTabs[id] = { id, kind: 'fm'|'file', workspace, file, name }
+  const wsPanel = panels[0];
+  const wsStrip = wsPanel.querySelector('.tabstrip');
+  const wsContent = wsPanel.querySelector('.panel-content');
+  const wsAddBtn = wsStrip.querySelector('.tab-add');
+  const openTabs = new Map();
+  let activeWsId = null;
+
+  function tabIdForFile(workspace, file) {
+    return 'ws-' + (file || workspace).replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+
+  function ensureWorkspaceTab({ kind, workspace, file, name }) {
+    const id = kind === 'fm' ? 'ws-fm' : tabIdForFile(workspace, file);
+    if (openTabs.has(id)) return id;
+
+    const tabEl = makeTabEl({ id, name, closeable: true, kind });
+    wsStrip.insertBefore(tabEl, wsAddBtn);
+
+    const view = document.createElement('div');
+    view.className = 'view';
+    view.dataset.view = id;
+    const iframe = document.createElement('iframe');
+    iframe.className = 'panel-frame';
+    iframe.title = name;
+    iframe.src = kind === 'fm' ? '/workspaces/files.html' : `/workspaces/${workspace}.html?file=${encodeURIComponent(file)}`;
+    view.appendChild(iframe);
+    wsContent.appendChild(view);
+    bindIframeShortcuts(iframe);
+
+    openTabs.set(id, { id, kind, workspace, file, name });
+    return id;
+  }
+
+  function activateWorkspaceTab(id) {
+    activeWsId = id;
+    activateTab(wsPanel, id);
+    refreshCounts();
+    saveSession();
+  }
+
+  function closeWorkspaceTab(id) {
+    const tab = wsStrip.querySelector(`.tab[data-id="${id}"]`);
+    const view = wsContent.querySelector(`.view[data-view="${id}"]`);
+    if (!tab) return;
+    const sibs = [...wsStrip.querySelectorAll('.tab')];
+    const idx = sibs.indexOf(tab);
+    tab.remove();
+    if (view) view.remove();
+    openTabs.delete(id);
+    if (activeWsId === id) {
+      const remaining = [...wsStrip.querySelectorAll('.tab')];
+      const next = remaining[Math.max(0, idx - 1)] || remaining[0];
+      if (next) activateWorkspaceTab(next.dataset.id);
+      else { activeWsId = null; updateEmptyStates(); saveSession(); }
+    }
+    refreshCounts();
+  }
+
+  function openWorkspaceFM() {
+    // The + button always opens a fresh Files tab. If a Files tab already
+    // exists, just activate it.
+    if (openTabs.has('ws-fm')) { activateWorkspaceTab('ws-fm'); return; }
+    const id = ensureWorkspaceTab({ kind: 'fm', name: 'Files' });
+    activateWorkspaceTab(id);
+  }
+
+  function openWorkspaceFile(workspace, file) {
+    const newId = tabIdForFile(workspace, file);
+    const newName = file ? file.split('/').pop() : workspace;
+    // Already open → just activate
+    if (openTabs.has(newId)) { activateWorkspaceTab(newId); return; }
+    // If there's an active workspace tab, REPLACE it (browser-style: click a
+    // file in the Files browser → Files tab transforms into the file tab).
+    // For a separate tab, the user hits the + button first.
+    if (activeWsId && openTabs.has(activeWsId)) {
+      replaceWorkspaceTab(activeWsId, { kind: 'file', workspace, file, name: newName });
+      return;
+    }
+    // Otherwise create new
+    ensureWorkspaceTab({ kind: 'file', workspace, file, name: newName });
+    activateWorkspaceTab(newId);
+  }
+
+  function replaceWorkspaceTab(oldId, spec) {
+    const newId = spec.kind === 'fm' ? 'ws-fm' : tabIdForFile(spec.workspace, spec.file);
+    const tab = wsStrip.querySelector(`.tab[data-id="${oldId}"]`);
+    const view = wsContent.querySelector(`.view[data-view="${oldId}"]`);
+    if (!tab || !view) return;
+    tab.dataset.id = newId;
+    if (spec.kind) tab.dataset.kind = spec.kind;
+    const nameEl = tab.querySelector('.tab-name');
+    if (nameEl) nameEl.textContent = spec.name;
+    view.dataset.view = newId;
+    const iframe = view.querySelector('iframe');
+    const newSrc = spec.kind === 'fm'
+      ? '/workspaces/files.html'
+      : `/workspaces/${spec.workspace}.html?file=${encodeURIComponent(spec.file)}`;
+    if (iframe) {
+      iframe.src = newSrc;
+      iframe.title = spec.name;
+    }
+    openTabs.delete(oldId);
+    openTabs.set(newId, { id: newId, ...spec });
+    if (activeWsId === oldId) activeWsId = newId;
+    activateTab(wsPanel, newId);
+    refreshCounts();
+    saveSession();
+  }
+
+  // Files.html and other workspace addons send open-file messages
+  window.addEventListener('message', (e) => {
+    const data = e.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'open-file' && data.workspace) {
+      openWorkspaceFile(data.workspace, data.file);
+    }
+  });
+
+  /* ── Display tabs (hoisted from default-display) ─────── */
+  const dispPanel = panels[1];
+  const dispStrip = dispPanel.querySelector('.tabstrip');
+  let activeDisplayName = null;
+  let displayPollTimer = null;
+
+  function renderDisplayTabs(files) {
+    const existing = new Map();
+    dispStrip.querySelectorAll('.tab').forEach(t => existing.set(t.dataset.fname, t));
+    const wantNames = new Set(files.map(f => f.name));
+    // Remove tabs no longer in the pool
+    for (const [name, tab] of existing) if (!wantNames.has(name)) tab.remove();
+    // Add tabs that are new (preserve order)
+    files.forEach(f => {
+      let tab = existing.get(f.name);
+      if (!tab) {
+        const id = 'disp-' + f.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        tab = makeTabEl({ id, name: f.name, closeable: false, kind: 'display' });
+        tab.dataset.fname = f.name;
+        dispStrip.appendChild(tab);
+      }
+    });
+    // Reorder strip to match files order
+    files.forEach(f => {
+      const t = dispStrip.querySelector(`.tab[data-fname="${CSS.escape(f.name)}"]`);
+      if (t) dispStrip.appendChild(t);
+    });
+    // If no active selection yet, pick the first
+    if (!activeDisplayName && files.length) activeDisplayName = files[0].name;
+    // Mark active
+    dispStrip.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.fname === activeDisplayName));
+    refreshCounts();
+  }
+
+  async function pollDisplayPool() {
+    try {
+      const res = await fetch('/api/output-pool');
+      if (!res.ok) return;
+      const data = await res.json();
+      const files = data.files || [];
+      renderDisplayTabs(files);
+    } catch {}
+  }
+  function startDisplayPoll() {
+    pollDisplayPool();
+    if (displayPollTimer) return;
+    displayPollTimer = setInterval(pollDisplayPool, 1500);
+  }
+
+  /* ── Seam drag (flex-grow, proportion-preserving) ────── */
+  seams.forEach(seam => {
+    seam.addEventListener('pointerdown', e => {
       e.preventDefault();
       seam.classList.add('dragging');
       document.body.classList.add('resizing');
       seam.setPointerCapture(e.pointerId);
-
-      const leftPanel = panels[seam.dataset.left];
-      const rightPanel = panels[seam.dataset.right];
-      const container = document.getElementById('triptych');
-      const containerRect = container.getBoundingClientRect();
-      const MIN_PCT = 12;
-
-      const onMove = (ev) => {
-        if (isVertical()) {
-          const y = ev.clientY - containerRect.top;
-          const pct = (y / containerRect.height) * 100;
-          if (pct < MIN_PCT || pct > (100 - MIN_PCT)) return;
-          leftPanel.style.flex = `0 0 ${pct}%`;
-          rightPanel.style.flex = `0 0 ${100 - pct}%`;
-        } else {
-          const leftRect = leftPanel.getBoundingClientRect();
-          const rightRect = rightPanel.getBoundingClientRect();
-          const combinedWidth = leftRect.width + rightRect.width;
-          const x = ev.clientX - leftRect.left;
-          const leftPct = (x / combinedWidth) * 100;
-          const rightPct = 100 - leftPct;
-          if (leftPct < MIN_PCT || rightPct < MIN_PCT) return;
-          leftPanel.style.flex = `${leftPct} 1 0%`;
-          rightPanel.style.flex = `${rightPct} 1 0%`;
-        }
-        syncLabels();
+      const startX = e.clientX;
+      const leftName = seam.dataset.left;
+      const rightName = seam.dataset.right;
+      let leftIdx = panels.findIndex(p => p.dataset.panel === leftName);
+      let rightIdx = panels.findIndex(p => p.dataset.panel === rightName);
+      // Skip closed neighbors
+      while (leftIdx >= 0 && panels[leftIdx].classList.contains('closed')) leftIdx--;
+      while (rightIdx < panels.length && panels[rightIdx].classList.contains('closed')) rightIdx++;
+      if (leftIdx < 0 || rightIdx >= panels.length) {
+        seam.classList.remove('dragging');
+        document.body.classList.remove('resizing');
+        return;
+      }
+      const stageW = stage.getBoundingClientRect().width;
+      const startFlexL = flex[leftIdx];
+      const startFlexR = flex[rightIdx];
+      const totalFlex  = startFlexL + startFlexR;
+      const onMove = ev => {
+        const dx = ev.clientX - startX;
+        const dxFrac = dx / stageW * 3;
+        const newL = Math.max(0.15, Math.min(totalFlex - 0.15, startFlexL + dxFrac));
+        flex[leftIdx]  = newL;
+        flex[rightIdx] = totalFlex - newL;
+        applyFlex();
         debouncedFit();
       };
-
       const onUp = () => {
         seam.classList.remove('dragging');
         document.body.classList.remove('resizing');
@@ -157,51 +467,40 @@
         clearTimeout(fitDebounce);
         fitTerminal();
       };
-
       seam.addEventListener('pointermove', onMove);
       seam.addEventListener('pointerup', onUp);
     });
   });
 
-  // ── WebSocket ──────────────────────────────────────────
+  /* ── WebSocket (preserved from v1) ───────────────────── */
   let ws = null;
   let wsReconnectTimer = null;
+  const visiblePanels = ['workspace', 'display', 'terminal'];
 
   function connectWs() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}`);
-
     ws.onopen = () => {
       setWsStatus(true);
-      if (visiblePanels.includes('workspace')) wsSend({ type: 'register', role: 'panel-a' });
-      if (visiblePanels.includes('display'))   wsSend({ type: 'register', role: 'panel-b' });
-      if (visiblePanels.includes('terminal'))  wsSend({ type: 'register', role: 'terminal' });
+      wsSend({ type: 'register', role: 'panel-a' });
+      wsSend({ type: 'register', role: 'panel-b' });
+      wsSend({ type: 'register', role: 'terminal' });
     };
-
     ws.onmessage = (event) => {
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
-
       switch (msg.type) {
         case 'terminal-data': {
-          // Route to the per-session terminal instance. Falls back to the
-          // default (Phase 3 and earlier) terminal if no sessionId is present.
           const sid = msg.sessionId;
-          if (sid && termInstances.has(sid)) {
-            termInstances.get(sid).term.write(msg.data);
-          } else if (term) {
-            term.write(msg.data);
-          }
+          if (sid && termInstances.has(sid)) termInstances.get(sid).term.write(msg.data);
+          else if (term) term.write(msg.data);
           break;
         }
         case 'session-list': {
           const prevActive = activeSessionId;
           sessionsOrder = msg.sessions || [];
           if (msg.attached && !activeSessionId) activeSessionId = msg.attached;
-          // Ensure each live session has a Terminal instance so data arrives
-          // even for non-focused sessions (preserves scrollback on switch).
           sessionsOrder.forEach(s => ensureTermInstance(s.id));
-          // Remove instances for sessions that have died.
           for (const [id] of termInstances) {
             if (!sessionsOrder.find(s => s.id === id)) {
               const rec = termInstances.get(id);
@@ -210,110 +509,140 @@
             }
           }
           const activeDied = !sessionsOrder.find(s => s.id === activeSessionId);
-          if (activeDied && sessionsOrder.length) {
-            activeSessionId = sessionsOrder[0].id;
-          }
-          // If our active session died, tell the server about the new one so
-          // its attachedSessionId stays in sync (the server also re-attaches
-          // orphans server-side, but this closes the window between the
-          // client's UI switch and the next user input).
-          if (activeSessionId) {
-            setActiveSession(activeSessionId, /*remote*/ activeDied && activeSessionId !== prevActive);
-          }
+          if (activeDied && sessionsOrder.length) activeSessionId = sessionsOrder[0].id;
+          if (activeSessionId) setActiveSession(activeSessionId, activeDied && activeSessionId !== prevActive);
           renderTerminalTabs();
           break;
         }
         case 'session-created': {
           sessionsOrder = msg.sessions || sessionsOrder;
-          if (msg.sessionId) setActiveSession(msg.sessionId, /*remote*/false);
+          if (msg.sessionId) setActiveSession(msg.sessionId, false);
           renderTerminalTabs();
           break;
         }
         case 'session-switched': {
-          if (msg.sessionId) setActiveSession(msg.sessionId, /*remote*/false);
+          if (msg.sessionId) setActiveSession(msg.sessionId, false);
           break;
         }
         case 'session-kill-rejected': {
-          // Currently only reason: last-session. No-op; keybind is idempotent.
+          showToast(`can't close last terminal`);
           break;
         }
         case 'reload':
           reloadDisplay();
           break;
         case 'switch-workspace':
-          if (msg.workspace) loadWorkspace(msg.workspace, msg.file);
+          if (msg.workspace) openWorkspaceFile(msg.workspace, msg.file);
           break;
         case 'switch-display':
-          if (msg.display) loadDisplay(msg.display);
-          break;
+          break; // legacy — display is now driven by tab list
       }
     };
-
     ws.onclose = () => {
       setWsStatus(false);
       if (!wsReconnectTimer) {
         wsReconnectTimer = setTimeout(() => { wsReconnectTimer = null; connectWs(); }, 2000);
       }
     };
-
     ws.onerror = () => ws.close();
   }
-
   function wsSend(msg) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }
-
   function setWsStatus(connected) {
-    const dot = $('#ws-dot');
-    dot.className = connected ? 'dot dot-on' : 'dot dot-off';
-    dot.title = connected ? 'Connected' : 'Disconnected';
+    const ind = $('#sync-indicator');
+    if (!ind) return;
+    ind.classList.toggle('connected', connected);
+    ind.title = connected ? 'Connected' : 'Disconnected';
   }
 
-  // ── Terminal (xterm.js, multi-session) ─────────────────
-  // termInstances: sessionId -> { term, fitAddon, container }
-  // `term` alias tracks the active session for back-compat with other code
-  // in this file that expects a singleton (e.g. fullscreen's fitTerminal).
+  /* ── Terminal (xterm.js, multi-session) — preserved ──── */
   const termInstances = new Map();
   let term = null;
   let fitAddon = null;
   let activeSessionId = null;
-  let sessionsOrder = [];  // [{id, name, createdAt}] from server
+  let sessionsOrder = [];
 
-  const XTERM_THEME = {
-    background: '#151210',
-    foreground: '#d8d0c8',
-    cursor: '#d8d0c8',
-    cursorAccent: '#151210',
-    selectionBackground: 'rgba(192, 128, 96, 0.2)',
-    black: '#151210',
-    brightBlack: '#605a54',
-    white: '#d8d0c8',
-    brightWhite: '#eae7e3',
-    blue: '#7a80d5',
-    brightBlue: '#9a9ee0',
-    green: '#3cc497',
-    brightGreen: '#68d4ad',
-    red: '#d47567',
-    brightRed: '#e09a8e',
-    yellow: '#c4a045',
-    brightYellow: '#dbb870',
-    cyan: '#48b5c5',
-    brightCyan: '#75c5d2',
-    magenta: '#b080c5',
-    brightMagenta: '#c298d5',
+  // xterm.js doesn't read CSS variables, so themes are objects we apply
+  // imperatively whenever the document theme flips.
+  const XTERM_THEMES = {
+    dark: {
+      background: '#0d0c0b',
+      foreground: '#d8d2c8',
+      cursor: '#f08355',
+      cursorAccent: '#0d0c0b',
+      selectionBackground: 'rgba(240, 131, 85, 0.22)',
+      black: '#0d0c0b',
+      brightBlack: '#605a54',
+      white: '#d8d2c8',
+      brightWhite: '#f3eee5',
+      blue: '#7e8ad9',
+      brightBlue: '#9aa3e0',
+      green: '#6ec79a',
+      brightGreen: '#8fd6b1',
+      red: '#e07158',
+      brightRed: '#ea8e7a',
+      yellow: '#d8a64a',
+      brightYellow: '#e6bc70',
+      cyan: '#6ec5c7',
+      brightCyan: '#90d3d4',
+      magenta: '#b896d4',
+      brightMagenta: '#cdb0e0',
+    },
+    light: {
+      background: '#fbf8f2',
+      foreground: '#1f1a14',
+      cursor: '#d96640',
+      cursorAccent: '#fbf8f2',
+      selectionBackground: 'rgba(217, 102, 64, 0.22)',
+      black: '#1f1a14',
+      brightBlack: '#5e564b',
+      white: '#1f1a14',
+      brightWhite: '#0f0c08',
+      blue: '#5b66c0',
+      brightBlue: '#7a86d4',
+      green: '#3a8b6a',
+      brightGreen: '#52a682',
+      red: '#c25040',
+      brightRed: '#d56b5a',
+      yellow: '#a87a26',
+      brightYellow: '#c79945',
+      cyan: '#3e8c8e',
+      brightCyan: '#5fa9aa',
+      magenta: '#7e5e9a',
+      brightMagenta: '#9c7cb8',
+    },
   };
+  function currentXtermTheme() {
+    return XTERM_THEMES[document.documentElement.dataset.theme] || XTERM_THEMES.dark;
+  }
+  function applyXtermTheme(theme) {
+    const t = XTERM_THEMES[theme] || XTERM_THEMES.dark;
+    for (const rec of termInstances.values()) {
+      try {
+        rec.term.options.theme = t;
+        // xterm.js v5 doesn't repaint the inline .xterm-viewport bg on
+        // theme swap, so set it ourselves and force a refresh.
+        const vp = rec.container?.querySelector('.xterm-viewport');
+        if (vp) vp.style.backgroundColor = t.background;
+        if (typeof rec.term.refresh === 'function' && rec.term.rows) {
+          rec.term.refresh(0, rec.term.rows - 1);
+        }
+      } catch {}
+    }
+  }
+  // Back-compat alias for code below
+  const XTERM_THEME = XTERM_THEMES.dark;
 
   function ensureTermInstance(sessionId) {
     if (termInstances.has(sessionId)) return termInstances.get(sessionId);
     const host = $('#terminals');
     if (!host) return null;
-
     const container = document.createElement('div');
     container.className = 'terminal-instance';
     container.dataset.sessionId = sessionId;
     container.hidden = true;
     host.appendChild(container);
-
     const t = new Terminal({
       fontFamily: "'JetBrains Mono', 'Cascadia Code', 'Menlo', 'Consolas', monospace",
       fontSize: 13,
@@ -323,10 +652,8 @@
       cursorStyle: 'bar',
       allowProposedApi: true,
       customGlyphs: true,
-      theme: XTERM_THEME,
+      theme: currentXtermTheme(),
     });
-    // Let our Alt+* shortcuts bubble to the window handler instead of being
-    // consumed as a PTY escape sequence. Returning false tells xterm to skip.
     t.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && isTriptychShortcut(e)) return false;
       return true;
@@ -335,26 +662,9 @@
     t.loadAddon(fit);
     t.open(container);
     t.onData((data) => wsSend({ type: 'terminal-input', sessionId, data }));
-
     const rec = { term: t, fitAddon: fit, container };
     termInstances.set(sessionId, rec);
     return rec;
-  }
-
-  function initTerminal() {
-    // Creates a *placeholder* terminal for the session-1 back-compat PTY.
-    // The real wiring happens once the server sends us the session-list on
-    // register, at which point we'll ensure instances for all live sessions.
-    if (!termInstances.size) {
-      const rec = ensureTermInstance('1');
-      if (rec) {
-        activeSessionId = '1';
-        term = rec.term;
-        fitAddon = rec.fitAddon;
-        rec.container.hidden = false;
-        setTimeout(fitTerminal, 30);
-      }
-    }
   }
 
   function setActiveSession(sessionId, remote = true) {
@@ -363,46 +673,25 @@
     activeSessionId = sessionId;
     term = rec.term;
     fitAddon = rec.fitAddon;
-    for (const [id, r] of termInstances) {
-      r.container.hidden = (id !== sessionId);
-    }
-    // Notify the server so input/resize routing matches our view.
+    for (const [id, r] of termInstances) r.container.hidden = (id !== sessionId);
     if (remote) wsSend({ type: 'session-switch', sessionId });
-    // Focus synchronously — inside setTimeout the browser loses the user
-    // gesture context and may refuse cross-frame focus moves, leaving the
-    // terminal visible but unresponsive to typing. Size can wait a tick for
-    // layout to settle; focus cannot.
-    try { rec.term.focus(); } catch { /* noop */ }
-    if (visiblePanels.includes('terminal')) setFocus('terminal');
+    try { rec.term.focus(); } catch {}
     setTimeout(fitTerminal, 30);
     renderTerminalTabs();
   }
 
   function renderTerminalTabs() {
-    const el = $('#terminal-tabs');
-    if (!el) return;
-    if (!sessionsOrder.length || sessionsOrder.length < 2) {
-      el.hidden = true;
-      el.innerHTML = '';
-      return;
-    }
-    el.hidden = false;
-    el.innerHTML = '';
-    sessionsOrder.forEach((s, i) => {
-      const tab = document.createElement('button');
-      tab.className = 'term-tab' + (s.id === activeSessionId ? ' active' : '');
-      tab.innerHTML = '<span>' + escapeHtml(s.name) + '</span>'
-        + (i < 9 ? '<span class="term-tab-key">' + (i + 1) + '</span>' : '');
-      tab.onclick = () => {
-        if (s.id !== activeSessionId) setActiveSession(s.id);
-      };
-      el.appendChild(tab);
+    const tPanel = panels[2];
+    const tStrip = tPanel.querySelector('.tabstrip');
+    const addBtn = tStrip.querySelector('.tab-add');
+    // Remove existing terminal tabs
+    tStrip.querySelectorAll('.tab').forEach(t => t.remove());
+    sessionsOrder.forEach(s => {
+      const tabEl = makeTabEl({ id: s.id, name: s.name || `claude #${s.id}`, closeable: true, kind: 'term' });
+      if (s.id === activeSessionId) tabEl.classList.add('active');
+      tStrip.insertBefore(tabEl, addBtn);
     });
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g,
-      c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    refreshCounts();
   }
 
   function cycleSession(dir) {
@@ -414,359 +703,396 @@
   }
 
   let fitDebounce = null;
-
   function fitTerminal() {
     if (fitAddon && term) {
       try {
         fitAddon.fit();
-        wsSend({ type: 'terminal-resize', sessionId: activeSessionId,
-                 cols: term.cols, rows: term.rows });
-      } catch { /* noop */ }
+        wsSend({ type: 'terminal-resize', sessionId: activeSessionId, cols: term.cols, rows: term.rows });
+      } catch {}
     }
   }
-
   function debouncedFit() {
     clearTimeout(fitDebounce);
     fitDebounce = setTimeout(fitTerminal, 80);
   }
+  window.addEventListener('resize', () => { positionGhosts(); debouncedFit(); });
 
-  // ── Workspace navigation ─────────────────────────────
-  let currentWorkspace = null;
-  let currentFile = null;
-  const backBtn = $('#back-btn');
-
-  function loadWorkspace(id, file) {
-    currentWorkspace = id;
-    currentFile = file || null;
-    const iframe = panels.workspace?.querySelector('.panel-frame');
-    if (iframe) {
-      let src = `/workspaces/${id}.html`;
-      if (file) src += `?file=${encodeURIComponent(file)}`;
-      iframe.src = src;
-    }
-    updateBackButton();
-    saveSession();
-  }
-
-  function goToFiles() {
-    currentWorkspace = null;
-    currentFile = null;
-    const iframe = panels.workspace?.querySelector('.panel-frame');
-    if (iframe) iframe.src = '/workspaces/files.html';
-    updateBackButton();
-    saveSession();
-  }
-
-  function updateBackButton() {
-    if (backBtn) {
-      backBtn.classList.toggle('back-visible', currentWorkspace !== null);
+  /* ── Display reload (chokidar broadcast) ─────────────── */
+  function reloadDisplay() {
+    const iframe = panels[1].querySelector('iframe.panel-frame');
+    if (iframe?.contentWindow) {
+      iframe.contentWindow.postMessage({ type: 'triptych-display-reload' }, '*');
     }
   }
 
-  if (backBtn) {
-    backBtn.addEventListener('click', goToFiles);
-  }
-
-  // Listen for messages from workspace iframes (files.html sends open-file)
-  window.addEventListener('message', (e) => {
-    if (e.data?.type === 'open-file') {
-      loadWorkspace(e.data.workspace, e.data.file);
-    }
-  });
-
-  // ── Session state ──────────────────────────────────────
+  /* ── Session save / restore ──────────────────────────── */
   function saveSession() {
-    try {
-      const state = currentFile ? { lastFile: currentFile, lastWorkspace: currentWorkspace } : {};
-      fetch('/api/files/files/.session.json', {
-        method: 'PUT',
-        body: JSON.stringify(state),
-        headers: { 'Content-Type': 'application/json' },
-      }).catch(() => {});
-    } catch {}
+    const tabs = [...openTabs.values()].map(t => ({ id: t.id, kind: t.kind, workspace: t.workspace, file: t.file, name: t.name }));
+    const state = { tabs, activeId: activeWsId };
+    // Use text/plain so express.raw catches the body as a Buffer.
+    // express.json() (registered globally) hijacks application/json bodies
+    // and parses them into objects, which the PUT /api/files/* route
+    // then can't write to disk.
+    fetch('/api/files/files/.session.json', {
+      method: 'PUT',
+      body: JSON.stringify(state),
+      headers: { 'Content-Type': 'text/plain' },
+    }).catch(() => {});
   }
 
   async function restoreSession() {
     try {
       const res = await fetch('/api/files/files/.session.json');
       if (res.ok) {
-        const state = await res.json();
-        if (state.lastFile && state.lastWorkspace) {
-          loadWorkspace(state.lastWorkspace, state.lastFile);
-          return;
+        const text = await res.text();
+        if (text) {
+          const state = JSON.parse(text);
+          if (Array.isArray(state.tabs) && state.tabs.length) {
+            state.tabs.forEach(t => ensureWorkspaceTab(t));
+            const activeId = state.activeId && openTabs.has(state.activeId) ? state.activeId : state.tabs[0].id;
+            activateWorkspaceTab(activeId);
+            return;
+          }
+          // Legacy single-file session: lastFile + lastWorkspace
+          if (state.lastFile && state.lastWorkspace) {
+            openWorkspaceFile(state.lastWorkspace, state.lastFile);
+            return;
+          }
         }
       }
     } catch {}
-    // Default: show file browser
-    goToFiles();
+    // Default: open file manager
+    openWorkspaceFM();
   }
 
-  // ── Display ────────────────────────────────────────────
-  let currentDisplay = null;
-
-  function loadDisplay(id) {
-    currentDisplay = id;
-    const iframe = panels.display?.querySelector('.panel-frame');
-    if (iframe) iframe.src = `/core/${id}.html`;
-  }
-
-  function reloadDisplay() {
-    const iframe = panels.display?.querySelector('.panel-frame');
-    if (iframe && iframe.src) {
-      const url = new URL(iframe.src);
-      url.searchParams.set('_t', Date.now());
-      iframe.src = url.toString();
-    }
-  }
-
-  // ── Restore button clicks ──────────────────────────────
-  $$('.restore-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      togglePanel(btn.dataset.panel);
-    });
-  });
-
-  // ── Focus tracker ─────────────────────────────────────
-  // Which panel last received user attention. Drives within-panel key routing
-  // (Alt+Q/W/1/2/3) and Ctrl+Tab cycling. Defaults to first visible panel.
-  let focusedPanel = visiblePanels[0] || 'workspace';
-
-  function setFocus(name) {
-    if (!visiblePanels.includes(name)) return;
-    focusedPanel = name;
-    ALL_PANELS.forEach(p => panels[p]?.classList.toggle('focused', p === name));
-  }
-
-  ALL_PANELS.forEach(name => {
-    panels[name]?.addEventListener('pointerdown', () => setFocus(name), true);
-    // Iframes swallow pointerdown after load; mouseenter is a decent fallback
-    // when the user's cursor crosses into a panel. We only treat it as focus
-    // if there's no current window focus competing.
-    panels[name]?.addEventListener('mouseenter', () => {
-      if (!document.hasFocus() || document.activeElement === document.body) {
-        setFocus(name);
-      }
-    });
-  });
-  // Ensure initial state is reflected on the DOM
-  setFocus(focusedPanel);
-
-  function cycleFocus(dir) {
-    // Cycle through visible panels in ALL_PANELS order.
-    const visible = ALL_PANELS.filter(p => visiblePanels.includes(p));
-    if (visible.length <= 1) return;
-    const idx = visible.indexOf(focusedPanel);
-    const next = visible[(idx + dir + visible.length) % visible.length];
-    setFocus(next);
-    // If focusing terminal, give xterm the keyboard; otherwise blur xterm.
-    if (next === 'terminal' && term) term.focus();
-    else if (term && document.activeElement && panels.terminal?.contains(document.activeElement)) {
-      document.activeElement.blur?.();
-    }
-  }
-
-  // Send an action into the focused panel. Iframe panels (workspace, display)
-  // receive it via postMessage; the terminal panel handles it locally since
-  // it's not an iframe (xterm.js renders directly into the shell DOM).
-  function dispatchToFocused(action) {
-    if (focusedPanel === 'terminal') {
-      handleTerminalAction(action);
-      return;
-    }
-    const panel = panels[focusedPanel];
-    if (!panel) return;
-    const iframe = panel.querySelector('iframe.panel-frame');
-    if (iframe?.contentWindow) {
-      iframe.contentWindow.postMessage({ type: 'triptych-key', action }, '*');
-    }
-  }
-
-  function handleTerminalAction(action) {
-    switch (action) {
-      case 'new-session':
-        wsSend({ type: 'session-create' });
-        break;
-      case 'kill-session':
-        if (activeSessionId) wsSend({ type: 'session-kill', sessionId: activeSessionId });
-        break;
-      case 'prev-tab': cycleSession(-1); break;
-      case 'next-tab': cycleSession(1); break;
-      case 'tab-1': case 'tab-2': case 'tab-3': {
-        const n = parseInt(action.slice(4), 10) - 1;
-        const target = sessionsOrder[n];
-        if (target && target.id !== activeSessionId) setActiveSession(target.id);
-        break;
-      }
-    }
-  }
-
-  // ── Keyboard shortcuts ────────────────────────────────
-  // All shortcuts are left-hand, single-handed reachable.
-  //   Alt+1/2/3  toggle workspace / display / chat panel
-  //   Alt+Q / W  prev / next tab inside the focused panel
-  //   Alt+A / S  cycle panel focus (prev / next)
-  //   Alt+N / X  new / close Claude session (global)
-  const PANEL_TOGGLE_DIGITS = { '1': 'workspace', '2': 'display', '3': 'terminal' };
-  const SHORTCUT_KEYS = new Set(['1', '2', '3', 'q', 'w', 'a', 's', 'n', 'x']);
-
-  // Reliable modifier check — e.key='Alt' itself arrives with altKey=true, so
-  // we also require the key to be something other than a modifier.
-  function isTriptychShortcut(e) {
-    if (!e.altKey || e.ctrlKey || e.metaKey) return false;
-    const key = (e.key || '').toLowerCase();
-    return SHORTCUT_KEYS.has(key);
-  }
-
-  function handleShortcut(e) {
-    if (!isTriptychShortcut(e)) return;
-    // Beat xterm, iframe handlers, and browser menu accelerators.
-    e.preventDefault();
-    e.stopImmediatePropagation();
-
-    const key = (e.key || '').toLowerCase();
-
-    if (PANEL_TOGGLE_DIGITS[key]) {
-      const target = PANEL_TOGGLE_DIGITS[key];
-      const wasVisible = visiblePanels.includes(target);
-      togglePanel(target);
-      if (!wasVisible && visiblePanels.includes(target)) setFocus(target);
-      return;
-    }
-
-    if (key === 'q') { dispatchToFocused('prev-tab'); return; }
-    if (key === 'w') { dispatchToFocused('next-tab'); return; }
-    if (key === 'a') { cycleFocus(-1); return; }
-    if (key === 's') { cycleFocus(1); return; }
-    if (key === 'n') { handleTerminalAction('new-session'); return; }
-    if (key === 'x') { handleTerminalAction('kill-session'); return; }
-  }
-
-  // Same-origin iframes (workspace, display) keep their own event loop — the
-  // parent window never sees keydowns fired inside them. Bind the same handler
-  // to every target that might own keyboard focus: parent window, parent
-  // document, and each iframe document (re-bind on navigation since iframes
-  // get a fresh document when src changes).
+  /* ── Iframe shortcut binding (preserved) ─────────────── */
   function attachShortcuts(target) {
     if (!target || target.__triptychShortcutsBound) return;
     target.__triptychShortcutsBound = true;
     target.addEventListener('keydown', handleShortcut, true);
   }
-
-  attachShortcuts(window);
-  attachShortcuts(document);
-
+  // Walk an iframe document recursively, attaching focus + shortcut handlers
+  // to each level. Iframes don't propagate events to their parent document,
+  // so each nested document needs its own listeners (e.g. default-display
+  // hosts a #content-frame whose mousedowns we still want to focus the pane).
+  function attachToDocTree(doc, panelIdx) {
+    if (!doc) return;
+    try {
+      if (!doc.__triptychBound) {
+        doc.__triptychBound = true;
+        attachShortcuts(doc.defaultView);
+        attachShortcuts(doc);
+        if (panelIdx >= 0) {
+          doc.addEventListener('mousedown', () => focusPanel(panelIdx, true), true);
+        }
+      }
+      // Sync theme
+      doc.documentElement.dataset.theme = document.documentElement.dataset.theme || 'dark';
+      // Recurse into nested iframes
+      doc.querySelectorAll('iframe').forEach(nested => {
+        const visit = () => { try { attachToDocTree(nested.contentDocument, panelIdx); } catch {} };
+        visit();
+        nested.addEventListener('load', visit);
+      });
+    } catch {}
+  }
   function bindIframeShortcuts(iframe) {
     if (!iframe) return;
-    const tryBind = () => {
-      try {
-        attachShortcuts(iframe.contentWindow);
-        attachShortcuts(iframe.contentDocument);
-      } catch { /* cross-origin — can't reach */ }
-    };
+    const panel = iframe.closest('.panel');
+    const idx = panel ? panels.indexOf(panel) : -1;
+    const tryBind = () => attachToDocTree(iframe.contentDocument, idx);
     tryBind();
     iframe.addEventListener('load', tryBind);
   }
-
-  for (const p of ['workspace', 'display']) {
-    bindIframeShortcuts(panels[p]?.querySelector('.panel-frame'));
-  }
-
-  // Some addons (e.g. d3 scaffolds) replace iframe.src at runtime via
-  // shell.js API. MutationObserver catches any iframe added later.
+  attachShortcuts(window);
+  attachShortcuts(document);
+  // Bind to display iframe + any future iframes
+  bindIframeShortcuts(panels[1].querySelector('iframe.panel-frame'));
   new MutationObserver((muts) => {
     for (const m of muts) {
       for (const n of m.addedNodes) {
         if (n.nodeType === 1 && n.tagName === 'IFRAME') bindIframeShortcuts(n);
-        if (n.nodeType === 1 && n.querySelectorAll) {
-          n.querySelectorAll('iframe').forEach(bindIframeShortcuts);
-        }
+        if (n.nodeType === 1 && n.querySelectorAll) n.querySelectorAll('iframe').forEach(bindIframeShortcuts);
       }
     }
   }).observe(document.body, { childList: true, subtree: true });
 
-  // ── Shortcuts overlay ─────────────────────────────────
-  const shortcutsBtn = $('#shortcuts-btn');
-  const shortcutsOverlay = $('#shortcuts-overlay');
-  const shortcutsClose = $('#shortcuts-close');
-  function toggleShortcuts(show) {
-    if (!shortcutsOverlay) return;
-    const open = show ?? shortcutsOverlay.hasAttribute('hidden');
-    if (open) shortcutsOverlay.removeAttribute('hidden');
-    else shortcutsOverlay.setAttribute('hidden', '');
+  /* ── Hotkeys ──────────────────────────────────────────────
+     Cross-platform via e.code (the physical key) instead of e.key.
+     On macOS, Option+letter produces dead characters ("Œ" for Q,
+     "œ" for q, "˙" for h, etc.), so e.key is unreliable for Alt
+     shortcuts. e.code is layout-and-modifier independent.
+     ──────────────────────────────────────────────────────── */
+  const PANEL_TOGGLE_CODES = { Digit1: 'workspace', Digit2: 'display', Digit3: 'terminal' };
+  const TAB_PREV = new Set(['KeyQ']);
+  const TAB_NEXT = new Set(['KeyW']);
+  const FOCUS_PREV = new Set(['KeyA', 'BracketLeft']);
+  const FOCUS_NEXT = new Set(['KeyS', 'BracketRight']);
+  const NEW_IN_PANEL = new Set(['KeyN']);
+  const CLOSE_IN_PANEL = new Set(['KeyX']);
+  const TRIPTYCH_CODES = new Set([
+    ...Object.keys(PANEL_TOGGLE_CODES),
+    ...TAB_PREV, ...TAB_NEXT, ...FOCUS_PREV, ...FOCUS_NEXT,
+    ...NEW_IN_PANEL, ...CLOSE_IN_PANEL,
+  ]);
+
+  function isTriptychShortcut(e) {
+    if (!e.altKey || e.ctrlKey || e.metaKey) return false;
+    return TRIPTYCH_CODES.has(e.code);
   }
-  shortcutsBtn?.addEventListener('click', () => toggleShortcuts());
-  shortcutsClose?.addEventListener('click', () => toggleShortcuts(false));
-  shortcutsOverlay?.addEventListener('click', (e) => {
-    if (e.target === shortcutsOverlay) toggleShortcuts(false);
+
+  function handleShortcut(e) {
+    // Cmd (mac) / Ctrl (win) + K — open command bar
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.code === 'KeyK') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      openCmdBar();
+      return;
+    }
+    if (e.code === 'Escape') {
+      if (cmdBar.classList.contains('open')) { closeCmdBar(); return; }
+      const open = $$('.menu-pop.open');
+      if (open.length) { open.forEach(m => { m.classList.remove('open'); m.classList.remove('shown'); }); return; }
+    }
+    if (cmdBar.classList.contains('open')) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (!isTriptychShortcut(e)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const code = e.code;
+    if (PANEL_TOGGLE_CODES[code]) { togglePane(PANEL_TOGGLE_CODES[code]); return; }
+    if (TAB_PREV.has(code))   { dispatchTabKey(-1); return; }
+    if (TAB_NEXT.has(code))   { dispatchTabKey(+1); return; }
+    if (FOCUS_PREV.has(code)) { cycleFocus(-1); return; }
+    if (FOCUS_NEXT.has(code)) { cycleFocus(+1); return; }
+    if (NEW_IN_PANEL.has(code))   { handleNewInPanel(); return; }
+    if (CLOSE_IN_PANEL.has(code)) { handleCloseInPanel(); return; }
+  }
+
+  function dispatchTabKey(dir) {
+    const panel = panels[focusedIdx];
+    const name = panel.dataset.panel;
+    if (name === 'terminal') { cycleSession(dir); return; }
+    const tabs = [...panel.querySelectorAll('.tabstrip .tab')];
+    if (!tabs.length) return;
+    const cur = tabs.findIndex(t => t.classList.contains('active'));
+    const next = tabs[(Math.max(0, cur) + dir + tabs.length) % tabs.length];
+    if (!next) return;
+    handleTabClick(panel, next);
+  }
+
+  function cycleFocus(dir) {
+    const visible = panels.map((p, i) => ({ p, i })).filter(x => !x.p.classList.contains('closed'));
+    if (visible.length <= 1) return;
+    const cur = visible.findIndex(x => x.i === focusedIdx);
+    const nxt = visible[(cur + dir + visible.length) % visible.length];
+    focusPanel(nxt.i);
+  }
+
+  function handleNewInPanel() {
+    const panel = panels[focusedIdx];
+    const name = panel.dataset.panel;
+    if (name === 'terminal') wsSend({ type: 'session-create' });
+    else if (name === 'workspace') openWorkspaceFM();
+  }
+  function handleCloseInPanel() {
+    const panel = panels[focusedIdx];
+    const name = panel.dataset.panel;
+    if (name === 'terminal') {
+      if (activeSessionId) wsSend({ type: 'session-kill', sessionId: activeSessionId });
+    } else if (name === 'workspace') {
+      if (activeWsId) closeWorkspaceTab(activeWsId);
+    }
+  }
+
+  /* ── Command bar ─────────────────────────────────────── */
+  let selectedIdx = 0;
+  let cachedResults = [];
+
+  function buildResults(query) {
+    const q = (query || '').trim().toLowerCase();
+    const results = [];
+    // Workspace tabs (currently open)
+    for (const t of openTabs.values()) {
+      results.push({
+        kind: 'tab', name: t.name, ctx: 'workspace',
+        action: () => { focusPanel(0, true); activateWorkspaceTab(t.id); }
+      });
+    }
+    // Display files
+    dispStrip.querySelectorAll('.tab').forEach(t => {
+      const fname = t.dataset.fname;
+      if (!fname) return;
+      results.push({
+        kind: 'display', name: fname, ctx: 'display',
+        action: () => { focusPanel(1, true); handleTabClick(panels[1], t); }
+      });
+    });
+    // Terminal sessions
+    sessionsOrder.forEach(s => {
+      results.push({
+        kind: 'session', name: s.name || `claude #${s.id}`, ctx: 'terminal',
+        action: () => { focusPanel(2, true); setActiveSession(s.id); }
+      });
+    });
+    // Static actions
+    results.push({ kind: 'action', name: 'open file manager', ctx: 'Alt+N', action: () => { focusPanel(0, true); openWorkspaceFM(); } });
+    results.push({ kind: 'action', name: 'new claude session', ctx: 'Alt+N (term)', action: () => { focusPanel(2, true); wsSend({ type: 'session-create' }); } });
+    if (!q) return results.slice(0, 10);
+    return results.map(r => ({ r, score: scoreMatch(r, q) }))
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(x => x.r);
+  }
+
+  function scoreMatch(r, q) {
+    const hay = (r.name + ' ' + r.ctx + ' ' + r.kind).toLowerCase();
+    if (hay.includes(q)) return 10 + (r.name.toLowerCase().startsWith(q) ? 5 : 0);
+    let i = 0;
+    for (const c of q) {
+      const f = hay.indexOf(c, i);
+      if (f < 0) return 0;
+      i = f + 1;
+    }
+    return 1;
+  }
+
+  function renderResults(query) {
+    cachedResults = buildResults(query);
+    cmdResults.innerHTML = cachedResults.length
+      ? cachedResults.map((r, i) => `
+          <div class="cmd-result ${i === 0 ? 'selected' : ''}" data-i="${i}">
+            <span class="r-kind">${escapeHtml(r.kind)}</span>
+            <span class="r-name">${escapeHtml(r.name)}</span>
+            <span class="r-context">${escapeHtml(r.ctx)}</span>
+          </div>`).join('')
+      : `<div class="cmd-result" style="cursor:default;color:var(--text-dim);"><span class="r-kind">·</span><span class="r-name">no matches — <kbd style="font-family:var(--font-mono);background:var(--chrome);padding:1px 5px;border-radius:3px;border:1px solid var(--hairline);">⇧⏎</kbd> sends to claude</span></div>`;
+    selectedIdx = 0;
+    if ((query || '').trim().length > 2) sendHint.classList.add('show');
+    else sendHint.classList.remove('show');
+  }
+
+  function openCmdBar() {
+    cmdBar.hidden = false;
+    cmdOverlay.classList.add('open');
+    requestAnimationFrame(() => cmdBar.classList.add('open'));
+    cmdInput.value = '';
+    renderResults('');
+    setTimeout(() => cmdInput.focus(), 60);
+  }
+  function closeCmdBar() {
+    cmdBar.classList.remove('open');
+    cmdOverlay.classList.remove('open');
+    setTimeout(() => { cmdBar.hidden = true; }, 200);
+  }
+  cmdOverlay.addEventListener('click', closeCmdBar);
+  $('#cmd-hint').addEventListener('click', openCmdBar);
+  cmdInput.addEventListener('input', e => renderResults(e.target.value));
+  cmdInput.addEventListener('keydown', e => {
+    const items = [...cmdResults.querySelectorAll('.cmd-result[data-i]')];
+    if (e.key === 'ArrowDown') { e.preventDefault(); selectedIdx = Math.min(items.length - 1, selectedIdx + 1); updateSelected(items); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); selectedIdx = Math.max(0, selectedIdx - 1); updateSelected(items); }
+    else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const m = cachedResults[selectedIdx];
+      if (m) { closeCmdBar(); m.action(); }
+      else if (cmdInput.value.trim()) showToast(`no match — try <span class="accent">⇧⏎</span> to send to claude`);
+    }
+    else if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault();
+      const q = cmdInput.value.trim();
+      if (!q) return;
+      sendToTerminal(q);
+      closeCmdBar();
+    }
+  });
+  function updateSelected(items) {
+    items.forEach((it, i) => it.classList.toggle('selected', i === selectedIdx));
+    items[selectedIdx]?.scrollIntoView({ block: 'nearest' });
+  }
+  cmdResults.addEventListener('click', e => {
+    const r = e.target.closest('.cmd-result[data-i]');
+    if (!r) return;
+    const m = cachedResults[parseInt(r.dataset.i, 10)];
+    if (m) { closeCmdBar(); m.action(); }
+  });
+  function sendToTerminal(query) {
+    const tPanel = panels[2];
+    if (tPanel.classList.contains('closed')) togglePane('terminal');
+    focusPanel(2, true);
+    wsSend({ type: 'terminal-input', sessionId: activeSessionId, data: query + '\r' });
+    showToast(`sent → <span class="accent">claude</span>`);
+  }
+
+  /* ── Settings & Help popovers ────────────────────────── */
+  function openMenu(menu) {
+    $$('.menu-pop.open').forEach(m => { if (m !== menu) { m.classList.remove('open'); m.classList.remove('shown'); } });
+    menu.classList.add('open');
+    requestAnimationFrame(() => requestAnimationFrame(() => menu.classList.add('shown')));
+    setTimeout(() => document.addEventListener('mousedown', closeOnOutside, { once: true }), 0);
+  }
+  function closeOnOutside(e) {
+    let closedAny = false;
+    $$('.menu-pop.open').forEach(m => {
+      if (!m.contains(e.target) && !e.target.closest('#settings-btn') && !e.target.closest('#help-btn')) {
+        m.classList.remove('open'); m.classList.remove('shown'); closedAny = true;
+      }
+    });
+    if (!closedAny) setTimeout(() => document.addEventListener('mousedown', closeOnOutside, { once: true }), 0);
+  }
+  $('#settings-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    const menu = $('#settings-menu');
+    if (menu.classList.contains('open')) { menu.classList.remove('open'); menu.classList.remove('shown'); }
+    else openMenu(menu);
+  });
+  $('#help-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    const menu = $('#help-menu');
+    if (menu.classList.contains('open')) { menu.classList.remove('open'); menu.classList.remove('shown'); }
+    else openMenu(menu);
   });
 
-  // ── Fullscreen toggle ─────────────────────────────────
-  const fullscreenBtn = $('#fullscreen-btn');
-  const topbarEl = $('#topbar');
-  let peekReady = false;
-
-  function setFullscreen(on) {
-    if (on) {
-      document.body.classList.add('fullscreen');
-      peekReady = false;
-      topbarEl.style.top = `-${topbarEl.offsetHeight}px`;
-      // Use browser Fullscreen API
-      if (document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      }
-      setTimeout(() => { peekReady = true; }, 600);
-    } else {
-      document.body.classList.remove('fullscreen');
-      peekReady = false;
-      topbarEl.style.top = '';
-      topbarEl.style.transition = '';
-      // Exit browser fullscreen if active
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-      }
-    }
-    setTimeout(fitTerminal, 50);
-  }
-
-  if (fullscreenBtn) {
-    fullscreenBtn.addEventListener('click', () => {
-      setFullscreen(!document.body.classList.contains('fullscreen'));
+  /* ── Theme toggle ────────────────────────────────────── */
+  function propagateThemeToIframes(theme, root) {
+    (root || document).querySelectorAll('iframe').forEach(f => {
+      try {
+        if (f.contentDocument) {
+          f.contentDocument.documentElement.dataset.theme = theme;
+          // Recurse into nested iframes (default-display has its own
+          // #content-frame loading the actual output file)
+          propagateThemeToIframes(theme, f.contentDocument);
+        }
+      } catch {}
     });
   }
-
-  // Sync if user exits fullscreen via Escape or browser controls
-  document.addEventListener('fullscreenchange', () => {
-    if (!document.fullscreenElement && document.body.classList.contains('fullscreen')) {
-      document.body.classList.remove('fullscreen');
-      peekReady = false;
-      topbarEl.style.top = '';
-      topbarEl.style.transition = '';
-      setTimeout(fitTerminal, 50);
-    }
+  function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('triptych-theme', theme); } catch {}
+    const t = $('#theme-toggle');
+    if (t) t.dataset.value = theme;
+    propagateThemeToIframes(theme);
+    applyXtermTheme(theme);
+  }
+  let savedTheme = 'dark';
+  try { savedTheme = localStorage.getItem('triptych-theme') || 'dark'; } catch {}
+  applyTheme(savedTheme);
+  document.addEventListener('click', e => {
+    const opt = e.target.closest('#theme-toggle [data-set]');
+    if (opt) applyTheme(opt.dataset.set);
   });
 
-  // Peek zone: mouse near top edge reveals topbar in fullscreen
-  document.addEventListener('mousemove', (e) => {
-    if (!document.body.classList.contains('fullscreen') || !peekReady) return;
-    if (e.clientY <= 6) {
-      topbarEl.style.transition = 'top 0.2s ease-out';
-      topbarEl.style.top = '0px';
-    }
-  });
+  /* ── escapeHtml ──────────────────────────────────────── */
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
 
-  topbarEl.addEventListener('mouseleave', () => {
-    if (document.body.classList.contains('fullscreen')) {
-      topbarEl.style.transition = 'top 0.2s ease-out';
-      topbarEl.style.top = `-${topbarEl.offsetHeight}px`;
-    }
-  });
-
-  // ── Init ───────────────────────────────────────────────
-  applyLayout();
+  /* ── Init ────────────────────────────────────────────── */
+  refreshCounts();
+  refreshGhostToggles();
   connectWs();
-  if (visiblePanels.includes('terminal')) initTerminal();
-  loadDisplay('default-display');
+  startDisplayPoll();
   restoreSession();
+  setTimeout(() => showToast(`triptych · <span class="accent">${cmdKeyLabel}</span> for command bar`), 800);
 
 })();

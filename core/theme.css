@@ -1,65 +1,151 @@
-/* ── Triptych Design Tokens ─────────────────────────────────
+/* ── Triptych Design Tokens — v2 ───────────────────────────
    Single source of truth. Change here → everywhere inherits.
+   Legacy aliases preserved at the bottom so existing addons
+   that reference --text, --space-md, --duration-fast, etc.
+   keep working without edits.
    Import: <link rel="stylesheet" href="/core/theme.css">
    ──────────────────────────────────────────────────────────── */
 
-@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600;700&family=Archivo:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap');
 
 :root {
-  /* ── Surfaces (warm browns, not neutral grays) ── */
-  --void:      #151210;
-  --surface:   #1e1a16;
-  --surface-2: #282320;
-  --surface-3: #322c26;
-  --chrome:    var(--surface);
+  /* ── Surfaces ── */
+  --void:        #161514;
+  --chrome:      #0e0d0c;
+  --surface:     #1c1a18;
+  --surface-2:   #232020;
+  --surface-3:   #2c2826;
+  --overlay:     rgba(8, 7, 6, 0.66);
 
-  /* ── Borders ──────────────────────────────── */
-  --border:  #3a332b;
-  --seam:    var(--border);
+  /* ── Borders ── */
+  --hairline:    #232120;
+  --hairline-hi: #2c2927;
 
-  /* ── Text (warm-tinted, not pure gray) ────── */
-  --text-hi:  #d8d0c8;
-  --text-mid: #968e84;
-  --text-dim: #685f56;
+  /* ── Text ── */
+  --text-hi:     #ece7e0;
+  --text-mid:    #948b81;
+  --text-dim:    #5a534c;
+  --text-faint:  #36322e;
 
-  /* Aliases (backward compat for workspace files) */
-  --text:   var(--text-hi);
-  --text-2: var(--text-mid);
-  --text-3: var(--text-dim);
+  /* ── Accent ── */
+  --accent:        #f08355;
+  --accent-hover:  #f59670;
+  --accent-deep:   #b9542f;
+  --accent-soft:   rgba(240, 131, 85, 0.12);
+  --accent-glow:   rgba(240, 131, 85, 0.22);
 
-  /* ── Accent ───────────────────────────────── */
-  --accent:         #cc7a58;
-  --accent-hover:   #d88a68;
-  --accent-surface: #2a1e16;
+  /* ── Semantic ── */
+  --ok:    #6ec79a;
+  --warn:  #d8a64a;
+  --err:   #e07158;
+  --info:  #7e8ad9;
 
-  /* ── Semantic ─────────────────────────────── */
-  --green:  #3cc497;
-  --red:    #d47567;
-  --yellow: #c4a045;
-  --blue:   #7a80d5;
+  /* ── Typography ── */
+  --font-sans:    'Inter Tight', system-ui, -apple-system, sans-serif;
+  --font-serif:   'Fraunces', Georgia, serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+  --font-display: var(--font-serif);
+  --font:         var(--font-sans);
 
-  /* ── Typography ───────────────────────────── */
-  --font:      'Archivo', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+  --text-2xs:    0.625rem;
+  --text-xs:     0.6875rem;
+  --text-sm:     0.8125rem;
+  --text-base:   0.9375rem;
+  --text-lg:     1.125rem;
+  --text-xl:     1.5rem;
+  --text-2xl:    2.25rem;
+  --text-display: clamp(2.5rem, 5vw, 4.5rem);
 
-  /* ── Type Scale (fixed rem for app UI) ────── */
-  --text-xs:   0.6875rem;
-  --text-sm:   0.8125rem;
-  --text-base: 0.875rem;
-  --text-lg:   1.125rem;
+  --leading-tight: 1.15;
+  --leading-snug:  1.35;
+  --leading-body:  1.55;
 
-  /* ── Spacing (4pt base) ───────────────────── */
-  --space-xs:  4px;
-  --space-sm:  8px;
-  --space-md:  12px;
-  --space-lg:  16px;
-  --space-xl:  24px;
-  --space-2xl: 32px;
-  --space-3xl: 48px;
+  --tracking-tight: -0.012em;
+  --tracking-flat:  0em;
+  --tracking-wide:  0.06em;
 
-  /* ── Motion ───────────────────────────────── */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --duration-fast: 120ms;
-  --duration-normal: 200ms;
-  --transition: var(--duration-normal) var(--ease-out);
+  /* ── Spacing (v2 numeric scale) ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ── Radii ── */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --r-xl: 14px;
+
+  /* ── Motion ── */
+  --ease:      cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-snap: cubic-bezier(0.4, 0, 0.2, 1);
+  --t-fast:    90ms;
+  --t-norm:    160ms;
+  --t-slow:    280ms;
+
+  /* ── Shadow ── */
+  --shadow-sm:     0 2px 8px -3px rgba(0,0,0,0.4);
+  --shadow-pop:    0 12px 36px -12px rgba(0,0,0,0.7), 0 2px 8px -3px rgba(0,0,0,0.5);
+  --shadow-float:  0 24px 60px -20px rgba(0,0,0,0.85), 0 4px 12px -4px rgba(0,0,0,0.55);
+  --ring-focus:    0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft);
+
+  /* ── Display authoring helpers ── */
+  --display-content-max:  64ch;
+  --display-pad:          var(--space-5);
+  --display-pad-y:        var(--space-4);
+
+  /* ────────────────────────────────────────────────────────
+     Legacy aliases — kept so existing addons that reference
+     these tokens render without edits. New code should use
+     the v2 names above.
+     ──────────────────────────────────────────────────────── */
+  --text:            var(--text-hi);
+  --text-2:          var(--text-mid);
+  --text-3:          var(--text-dim);
+  --border:          var(--hairline);
+  --seam:            var(--hairline);
+  --accent-surface:  var(--accent-soft);
+  --green:           var(--ok);
+  --red:             var(--err);
+  --yellow:          var(--warn);
+  --blue:            var(--info);
+  --space-xs:        var(--space-1);
+  --space-sm:        var(--space-2);
+  --space-md:        var(--space-3);
+  --space-lg:        var(--space-4);
+  --space-xl:        var(--space-5);
+  --space-2xl:       var(--space-6);
+  --space-3xl:       var(--space-7);
+  --ease-out:        var(--ease);
+  --duration-fast:   var(--t-fast);
+  --duration-normal: var(--t-norm);
+  --transition:      var(--t-norm) var(--ease);
+}
+
+/* ── Light theme ─────────────────────────────────────────── */
+html[data-theme="light"] {
+  --void:        #f5f1ea;
+  --chrome:      #ebe6dd;
+  --surface:     #fbf8f2;
+  --surface-2:   #ffffff;
+  --surface-3:   #f0eadc;
+  --overlay:     rgba(34, 28, 22, 0.18);
+
+  --hairline:    #d8cfc0;
+  --hairline-hi: #c5b9a4;
+
+  --text-hi:     #1f1a14;
+  --text-mid:    #5e564b;
+  --text-dim:    #8d8273;
+  --text-faint:  #b3a896;
+
+  --accent:        #d96640;
+  --accent-hover:  #e57a55;
+  --accent-deep:   #a44b2c;
+  --accent-soft:   rgba(217, 102, 64, 0.13);
+  --accent-glow:   rgba(217, 102, 64, 0.28);
 }
