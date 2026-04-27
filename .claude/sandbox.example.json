@@ -1,0 +1,22 @@
+{
+  "_comment": "Sandbox settings for macOS/Linux users. Copy the 'sandbox' block into your .claude/settings.local.json to enable OS-level sandboxing. Native Windows does not support sandbox yet (planned).",
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": false,
+    "filesystem": {
+      "allowWrite": ["workspace/", "displays/", "workspaces/", "core/", ".claude/skills/", "docs/"],
+      "denyWrite": [".git/", "server/", "node_modules/"]
+    },
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "cdn.jsdelivr.net",
+        "unpkg.com",
+        "esm.sh",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "registry.npmjs.org"
+      ]
+    }
+  }
+}

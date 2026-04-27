@@ -1,0 +1,65 @@
+/* ── Triptych Design Tokens ─────────────────────────────────
+   Single source of truth. Change here → everywhere inherits.
+   Import: <link rel="stylesheet" href="/core/theme.css">
+   ──────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap');
+
+:root {
+  /* ── Surfaces (warm browns, not neutral grays) ── */
+  --void:      #151210;
+  --surface:   #1e1a16;
+  --surface-2: #282320;
+  --surface-3: #322c26;
+  --chrome:    var(--surface);
+
+  /* ── Borders ──────────────────────────────── */
+  --border:  #3a332b;
+  --seam:    var(--border);
+
+  /* ── Text (warm-tinted, not pure gray) ────── */
+  --text-hi:  #d8d0c8;
+  --text-mid: #968e84;
+  --text-dim: #685f56;
+
+  /* Aliases (backward compat for workspace files) */
+  --text:   var(--text-hi);
+  --text-2: var(--text-mid);
+  --text-3: var(--text-dim);
+
+  /* ── Accent ───────────────────────────────── */
+  --accent:         #cc7a58;
+  --accent-hover:   #d88a68;
+  --accent-surface: #2a1e16;
+
+  /* ── Semantic ─────────────────────────────── */
+  --green:  #3cc497;
+  --red:    #d47567;
+  --yellow: #c4a045;
+  --blue:   #7a80d5;
+
+  /* ── Typography ───────────────────────────── */
+  --font:      'Archivo', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+
+  /* ── Type Scale (fixed rem for app UI) ────── */
+  --text-xs:   0.6875rem;
+  --text-sm:   0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg:   1.125rem;
+
+  /* ── Spacing (4pt base) ───────────────────── */
+  --space-xs:  4px;
+  --space-sm:  8px;
+  --space-md:  12px;
+  --space-lg:  16px;
+  --space-xl:  24px;
+  --space-2xl: 32px;
+  --space-3xl: 48px;
+
+  /* ── Motion ───────────────────────────────── */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --transition: var(--duration-normal) var(--ease-out);
+}

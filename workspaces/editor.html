@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Code Editor</title>
+  <link rel="stylesheet" href="/core/theme.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--void); color: var(--text-hi); font-family: var(--font); font-size: 13px; }
+
+    #app { display: flex; flex-direction: column; height: 100%; }
+
+    #toolbar {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      background: var(--chrome);
+      border-bottom: 1px solid var(--seam);
+      flex-shrink: 0;
+      user-select: none;
+    }
+    #toolbar .filename { color: var(--blue); font-size: 10px; }
+    #toolbar .lang { color: var(--text-mid); font-size: 10px; background: var(--surface-2); padding: 1px 6px; border-radius: 3px; }
+    #toolbar .info { color: var(--text-mid); font-size: 10px; }
+    #toolbar .saved { color: var(--green); font-size: 10px; opacity: 0; transition: opacity 0.3s; }
+    #toolbar .saved.show { opacity: 1; }
+    #toolbar .term-toggle {
+      background: none; border: 1px solid var(--seam); color: var(--text-mid);
+      padding: 2px 8px; border-radius: 3px; font-size: 10px; font-family: var(--font); cursor: pointer;
+    }
+    #toolbar .term-toggle:hover { color: var(--text-hi); border-color: var(--text-mid); }
+    #toolbar .term-toggle.active { color: var(--green); border-color: var(--green); }
+
+    #editor-container { flex: 1; overflow: hidden; min-height: 0; }
+
+    #term-panel { height: 200px; border-top: 1px solid var(--seam); background: var(--void); flex-shrink: 0; }
+    #term-panel.hidden { display: none; }
+    #term-panel .xterm { height: 100%; }
+
+    .cm-editor { height: 100%; font-size: 13px; }
+    .cm-editor .cm-scroller { overflow: auto; }
+    .cm-editor .cm-content { font-family: var(--font); }
+    .cm-editor.cm-focused { outline: none; }
+
+    #loading {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--void); color: var(--text-mid); font-size: 13px; z-index: 100;
+    }
+    #loading.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="loading">Loading editor...</div>
+    <div id="toolbar">
+      <span class="filename" id="filename">untitled</span>
+      <span class="lang" id="lang-badge">text</span>
+      <button class="term-toggle" id="term-toggle" title="Toggle terminal">&gt;_</button>
+      <span style="flex:1"></span>
+      <span class="info" id="cursor-info">1:1</span>
+      <span class="saved" id="save-indicator">saved</span>
+    </div>
+    <div id="editor-container"></div>
+    <div id="term-panel" class="hidden"></div>
+  </div>
+
+  <script src="/core/capture.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.min.js"></script>
+  <script type="module">
+    const loading = document.getElementById('loading');
+
+    // ── Language detection ──────────────────────────────────
+    const EXT_LANG = {
+      '.py': 'python', '.js': 'javascript', '.ts': 'javascript', '.jsx': 'javascript', '.tsx': 'javascript',
+      '.html': 'html', '.htm': 'html', '.css': 'css',
+      '.json': 'json', '.yaml': 'yaml', '.yml': 'yaml',
+      '.tex': 'latex', '.md': 'markdown',
+      '.sh': 'shell', '.bash': 'shell',
+      '.sql': 'sql', '.xml': 'xml',
+    };
+
+    function detectLanguage(filename) {
+      const ext = '.' + filename.split('.').pop().toLowerCase();
+      return EXT_LANG[ext] || 'text';
+    }
+
+    // ── Load CodeMirror ────────────────────────────────────
+    const { EditorState } = await import('https://esm.sh/@codemirror/state@6');
+    const { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, highlightActiveLine } = await import('https://esm.sh/@codemirror/view@6');
+    const { defaultKeymap, history, historyKeymap, indentWithTab } = await import('https://esm.sh/@codemirror/commands@6');
+    const { syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter, indentOnInput } = await import('https://esm.sh/@codemirror/language@6');
+    const { oneDark } = await import('https://esm.sh/@codemirror/theme-one-dark@6');
+    const { closeBrackets, closeBracketsKeymap } = await import('https://esm.sh/@codemirror/autocomplete@6');
+
+    // Language support (lazy load based on file)
+    async function getLanguageSupport(lang) {
+      try {
+        switch (lang) {
+          case 'python': return (await import('https://esm.sh/@codemirror/lang-python@6')).python();
+          case 'javascript': return (await import('https://esm.sh/@codemirror/lang-javascript@6')).javascript();
+          case 'html': return (await import('https://esm.sh/@codemirror/lang-html@6')).html();
+          case 'css': return (await import('https://esm.sh/@codemirror/lang-css@6')).css();
+          case 'json': return (await import('https://esm.sh/@codemirror/lang-json@6')).json();
+          case 'markdown': return (await import('https://esm.sh/@codemirror/lang-markdown@6')).markdown();
+          case 'xml': return (await import('https://esm.sh/@codemirror/lang-xml@6')).xml();
+          case 'sql': return (await import('https://esm.sh/@codemirror/lang-sql@6')).sql();
+          default: return [];
+        }
+      } catch { return []; }
+    }
+
+    // ── Init editor ────────────────────────────────────────
+    const params = new URLSearchParams(location.search);
+    const fileParam = params.get('file');
+    let currentFileName = fileParam || 'untitled.txt';
+    let currentLang = detectLanguage(currentFileName);
+    let saveTimer = null;
+    let lastContent = '';
+
+    document.getElementById('filename').textContent = currentFileName;
+    document.getElementById('lang-badge').textContent = currentLang;
+
+    // Load file content
+    let initialContent = '';
+    if (fileParam) {
+      try {
+        const res = await fetch(`/api/files/files/${encodeURIComponent(fileParam)}`);
+        if (res.ok) initialContent = await res.text();
+      } catch {}
+    }
+    lastContent = initialContent;
+
+    const langSupport = await getLanguageSupport(currentLang);
+
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: initialContent,
+        extensions: [
+          lineNumbers(),
+          highlightActiveLineGutter(),
+          highlightSpecialChars(),
+          history(),
+          foldGutter(),
+          drawSelection(),
+          indentOnInput(),
+          bracketMatching(),
+          closeBrackets(),
+          highlightActiveLine(),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          oneDark,
+          keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+          langSupport,
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              lastContent = update.state.doc.toString();
+              onContentChange();
+            }
+            if (update.selectionSet) {
+              const pos = update.state.selection.main.head;
+              const line = update.state.doc.lineAt(pos);
+              document.getElementById('cursor-info').textContent = `${line.number}:${pos - line.from + 1}`;
+            }
+          }),
+        ],
+      }),
+      parent: document.getElementById('editor-container'),
+    });
+
+    loading.classList.add('hidden');
+
+    // ── Auto-save ──────────────────────────────────────────
+    function onContentChange() {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => saveFile(lastContent), 1000);
+    }
+
+    async function saveFile(content) {
+      try {
+        await fetch(`/api/files/files/${encodeURIComponent(currentFileName)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'text/plain' },
+          body: content,
+        });
+        const indicator = document.getElementById('save-indicator');
+        indicator.classList.add('show');
+        setTimeout(() => indicator.classList.remove('show'), 1500);
+      } catch (err) {
+        console.warn('[editor] Save failed:', err);
+      }
+    }
+
+    // ── Terminal toggle ────────────────────────────────────
+    let term = null;
+    let fitAddon = null;
+    let ws = null;
+
+    const toggleBtn = document.getElementById('term-toggle');
+    const termPanel = document.getElementById('term-panel');
+
+    toggleBtn.addEventListener('click', () => {
+      const isHidden = termPanel.classList.toggle('hidden');
+      toggleBtn.classList.toggle('active', !isHidden);
+      if (!isHidden) {
+        if (!term) initTerminal();
+        else fitAddon.fit();
+      }
+    });
+
+    function initTerminal() {
+      term = new Terminal({
+        fontSize: 12,
+        fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+        theme: {
+          background: '#151210',
+          foreground: '#d8d0c8',
+          cursor: '#d8d0c8',
+          selectionBackground: 'rgba(192, 128, 96, 0.2)',
+        },
+        cursorBlink: true,
+      });
+      fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(termPanel);
+      fitAddon.fit();
+
+      // Connect WebSocket
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${proto}://${location.host}`);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'register', role: 'shell' }));
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'shell-data') term.write(msg.data);
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        term.write('\r\n\x1b[31m[disconnected]\x1b[0m\r\n');
+      };
+
+      term.onData((data) => {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'shell-input', data }));
+        }
+      });
+
+      // Resize handling
+      const ro = new ResizeObserver(() => {
+        if (!termPanel.classList.contains('hidden')) fitAddon.fit();
+      });
+      ro.observe(termPanel);
+
+      term.onResize(({ cols, rows }) => {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'shell-resize', cols, rows }));
+        }
+      });
+    }
+
+    // ── Capture integration ────────────────────────────────
+    Capture.init({
+      interval: 30000,
+      getContext: () => {
+        const sel = view.state.selection.main;
+        const selectedText = view.state.sliceDoc(sel.from, sel.to);
+        const line = view.state.doc.lineAt(sel.head);
+        return {
+          workspace: 'editor',
+          fileName: currentFileName,
+          language: currentLang,
+          content: lastContent.slice(0, 2000),
+          selectedText,
+          cursorLine: line.number,
+        };
+      },
+    });
+
+    // ── Register commands ──────────────────────────────────
+    Capture.registerCommands({
+      'get-content': () => ({
+        content: lastContent,
+        fileName: currentFileName,
+        language: currentLang,
+      }),
+      'get-selection': () => {
+        const sel = view.state.selection.main;
+        const line = view.state.doc.lineAt(sel.head);
+        return {
+          selectedText: view.state.sliceDoc(sel.from, sel.to),
+          cursorLine: line.number,
+          cursorCol: sel.head - line.from + 1,
+        };
+      },
+      'set-content': (params) => {
+        const content = params.content || '';
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
+        return { ok: true };
+      },
+      'insert-at-cursor': (params) => {
+        const text = params.text || '';
+        const pos = view.state.selection.main.head;
+        view.dispatch({ changes: { from: pos, insert: text } });
+        return { ok: true };
+      },
+      'replace-selection': (params) => {
+        const text = params.text || '';
+        const sel = view.state.selection.main;
+        view.dispatch({ changes: { from: sel.from, to: sel.to, insert: text } });
+        return { ok: true };
+      },
+      'go-to-line': (params) => {
+        const lineNum = parseInt(params.line);
+        if (lineNum >= 1 && lineNum <= view.state.doc.lines) {
+          const line = view.state.doc.line(lineNum);
+          view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true });
+          return { ok: true, line: lineNum };
+        }
+        return { error: 'Invalid line number' };
+      },
+      'open-file': (params) => {
+        const name = params.fileName || params.file;
+        if (name) {
+          location.href = `/workspaces/editor.html?file=${encodeURIComponent(name)}`;
+          return { ok: true };
+        }
+        return { error: 'No fileName specified' };
+      },
+      'list-files': async () => {
+        try {
+          const res = await fetch('/api/browse');
+          const data = await res.json();
+          const codeExts = ['.py', '.js', '.ts', '.json', '.yaml', '.yml', '.html', '.css', '.tex', '.sh', '.sql', '.txt'];
+          const files = (data.entries || []).filter(e => codeExts.includes(e.ext));
+          return { files: files.map(e => e.name) };
+        } catch { return { files: [] }; }
+      },
+    });
+  </script>
+</body>
+</html>

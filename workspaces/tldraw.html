@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Tldraw Workspace</title>
+  <link rel="stylesheet" href="/core/theme.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #root {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--void);
+    }
+    .tl-container { position: absolute; inset: 0; }
+    /* Mic button overlay */
+    #mic-btn {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      z-index: 9999;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(10, 10, 11, 0.7);
+      border: 1px solid var(--border);
+      color: #888;
+      font-size: 18px;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+    #mic-btn:hover { border-color: #555; color: #ccc; }
+    #mic-btn.recording { background: rgba(248, 113, 113, 0.3); border-color: #f87171; color: #f87171; }
+    /* Loading state */
+    #loading {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--void);
+      color: var(--text-dim);
+      font-family: var(--font);
+      font-size: 11px;
+      z-index: 10000;
+      transition: opacity 0.3s;
+    }
+    #loading.done { opacity: 0; pointer-events: none; }
+  </style>
+  <script src="/core/capture.js"></script>
+</head>
+<body>
+  <div id="loading">loading tldraw...</div>
+  <div id="root"></div>
+  <button id="mic-btn" title="Hold to speak">&#x1F3A4;</button>
+
+  <link rel="stylesheet" href="https://esm.sh/tldraw@3/tldraw.css">
+
+  <script type="module">
+    // Load React and tldraw from esm.sh with shared deps
+    // The ?deps= param ensures tldraw uses our exact React version
+    const React = await import('https://esm.sh/react@18.3.1');
+    const { createRoot } = await import('https://esm.sh/react-dom@18.3.1/client');
+    const { Tldraw, getSnapshot, loadSnapshot } = await import('https://esm.sh/tldraw@3?deps=react@18.3.1,react-dom@18.3.1');
+
+    let editorRef = null;
+    const params = new URLSearchParams(location.search);
+    const fileParam = params.get('file');
+    let saveTimer = null;
+
+    function App() {
+      return React.createElement(
+        'div',
+        { style: { position: 'fixed', inset: 0 } },
+        React.createElement(Tldraw, {
+          onMount: async (editor) => {
+            editorRef = editor;
+            document.getElementById('loading').classList.add('done');
+
+            // Load .tldr file if specified
+            if (fileParam) {
+              try {
+                const res = await fetch(`/api/files/files/${encodeURIComponent(fileParam)}`);
+                if (res.ok) {
+                  const data = await res.json();
+                  if (data && Object.keys(data).length > 0) {
+                    loadSnapshot(editor.store, data);
+                  }
+                }
+              } catch (e) { console.warn('[tldraw] Could not load file:', e); }
+
+              // Auto-save on changes
+              editor.store.listen(() => {
+                if (saveTimer) clearTimeout(saveTimer);
+                saveTimer = setTimeout(() => saveTldr(editor), 2000);
+              }, { scope: 'document' });
+            }
+
+            setupCapture(editor);
+            setupMic();
+          }
+        })
+      );
+    }
+
+    async function saveTldr(editor) {
+      if (!fileParam) return;
+      try {
+        const snapshot = getSnapshot(editor.store);
+        await fetch(`/api/files/files/${encodeURIComponent(fileParam)}`, {
+          method: 'PUT',
+          body: JSON.stringify(snapshot),
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      } catch (e) { console.warn('[tldraw] Save failed:', e); }
+    }
+
+    // ── Capture integration ──────────────────────────────
+    function setupCapture(editor) {
+      Capture.init({
+        interval: 30000,
+        captureImage: async () => {
+          try {
+            const shapeIds = editor.getCurrentPageShapeIds();
+            if (shapeIds.size === 0) return null;
+            const result = await editor.getSvgString([...shapeIds], { scale: 1, background: true });
+            if (!result || !result.svg) return null;
+            return svgToPngBase64(result.svg, result.width, result.height);
+          } catch (err) {
+            console.warn('[tldraw] Export failed:', err);
+            return null;
+          }
+        },
+        getContext: () => {
+          const shapes = editor.getCurrentPageShapes();
+          return {
+            viewer: 'tldraw',
+            shapeCount: shapes.length,
+            shapes: shapes.slice(0, 50).map(s => ({
+              id: s.id,
+              type: s.type,
+              x: Math.round(s.x),
+              y: Math.round(s.y),
+              props: s.props,
+            })),
+          };
+        },
+      });
+    }
+
+    // ── SVG to PNG conversion ──────────────────────────────
+    function svgToPngBase64(svgString, width, height) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = width || img.naturalWidth;
+          canvas.height = height || img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          URL.revokeObjectURL(url);
+          const dataUrl = canvas.toDataURL('image/png');
+          resolve(dataUrl.split(',')[1] || null);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve(null);
+        };
+        img.src = url;
+      });
+    }
+
+    // ── Voice (hold mic button to speak) ─────────────────
+    function setupMic() {
+      const btn = document.getElementById('mic-btn');
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        btn.style.display = 'none';
+        return;
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        Capture.now(transcript);
+      };
+
+      recognition.onerror = () => btn.classList.remove('recording');
+      recognition.onend = () => btn.classList.remove('recording');
+
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        btn.classList.add('recording');
+        try { recognition.start(); } catch {}
+      });
+
+      btn.addEventListener('pointerup', () => {
+        btn.classList.remove('recording');
+        try { recognition.stop(); } catch {}
+      });
+
+      btn.addEventListener('pointerleave', () => {
+        btn.classList.remove('recording');
+        try { recognition.stop(); } catch {}
+      });
+    }
+
+    // ── Mount ────────────────────────────────────────────
+    createRoot(document.getElementById('root')).render(
+      React.createElement(App)
+    );
+  </script>
+</body>
+</html>

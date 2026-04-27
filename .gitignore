@@ -1,0 +1,39 @@
+node_modules/
+workspace/snapshots/
+workspace/output/
+workspace/files/
+workspace/research/
+__pycache__/
+*.log
+
+# User-specific
+CLAUDE.local.md
+memory/
+.env
+
+# Credentials and tokens (never commit)
+workspace/config/google_credentials.json
+workspace/config/google_token.json
+workspace/config/*.json
+.claude/settings.local.json
+.claude/skills/study
+
+# UI design skills (installed via plugins, not part of Triptych core)
+.claude/skills/adapt/
+.claude/skills/animate/
+.claude/skills/audit/
+.claude/skills/bolder/
+.claude/skills/clarify/
+.claude/skills/colorize/
+.claude/skills/critique/
+.claude/skills/delight/
+.claude/skills/distill/
+.claude/skills/harden/
+.claude/skills/impeccable/
+.claude/skills/layout/
+.claude/skills/optimize/
+.claude/skills/overdrive/
+.claude/skills/polish/
+.claude/skills/quieter/
+.claude/skills/shape/
+.claude/skills/typeset/

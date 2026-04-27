@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/core/theme.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      background: var(--void);
+      color: var(--text-mid);
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 400;
+      overflow: hidden;
+    }
+
+    /* Empty state */
+    .empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .empty-title {
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .empty-sub {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* Content frame (loads output HTML) */
+    #content-frame {
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: var(--void);
+      display: none;
+    }
+
+    /* Image display — click to toggle fit ↔ natural size */
+    #image-view {
+      display: none;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      padding: 16px;
+    }
+    #image-view img {
+      display: block;
+      margin: 0 auto;
+      border-radius: 4px;
+      cursor: zoom-in;
+      max-width: 100%;
+      height: auto;
+    }
+    #image-view.zoomed {
+      overflow: auto;
+    }
+    #image-view.zoomed img {
+      max-width: none;
+      width: auto;
+      height: auto;
+      cursor: zoom-out;
+    }
+
+    /* Tab bar for multiple files */
+    .tab-bar {
+      display: none;
+      gap: 1px;
+      background: var(--void);
+      border-bottom: 1px solid var(--seam);
+      overflow-x: auto;
+      flex-shrink: 0;
+    }
+    .tab-bar.visible { display: flex; }
+    .tab {
+      padding: 5px 12px;
+      font-size: 10px;
+      font-family: var(--font);
+      font-weight: 300;
+      color: var(--text-dim);
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      white-space: nowrap;
+      transition: color 0.15s, background 0.15s;
+      border-bottom: 2px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .tab:hover { color: var(--text-mid); }
+    .tab.active {
+      color: var(--text-hi);
+      border-bottom-color: var(--accent);
+    }
+    .tab-key {
+      font-size: 9px;
+      color: var(--text-dim);
+      background: rgba(255,255,255,0.04);
+      padding: 1px 4px;
+      border-radius: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .tab.active .tab-key { background: rgba(204,122,88,0.15); color: var(--accent); }
+
+    /* Layout wrapper */
+    #display-root {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    #display-content {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+  <div id="display-root">
+    <div id="tab-bar" class="tab-bar"></div>
+    <div id="display-content">
+      <div id="empty" class="empty">
+        <div class="empty-title">Display</div>
+        <div class="empty-sub">output will appear here</div>
+      </div>
+      <iframe id="content-frame"></iframe>
+      <div id="image-view"></div>
+    </div>
+  </div>
+
+  <script>
+    const POOL_ENDPOINT = '/api/output-pool';
+    const OUTPUT_BASE = '/output';
+
+    // Tabs = files in workspace/output/ with known extensions. index.html is
+    // the canonical "main" tab (from unnamed show_* calls). Additional named
+    // displays (e.g. show_progress(name="training")) appear as training.html.
+    let lastKey = null;
+    let currentFiles = [];
+    let activeStem = null;   // survives refreshes so active tab persists
+    let lastFocusTs = 0;     // timestamp of last applied focus_display() call
+
+    function friendlyName(file) {
+      // index.html → "Main"; research.html → "Research State";
+      // everything else → title-cased stem for consistent rhythm.
+      if (file.name === 'index.html') return 'Main';
+      if (file.name === 'research.html') return 'Research State';
+      return file.stem
+        .replace(/[_-]/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function cacheBust(name, mtime) {
+      const stamp = mtime ? encodeURIComponent(String(mtime)) : String(Date.now());
+      return OUTPUT_BASE + '/' + name + '?_t=' + stamp;
+    }
+
+    // Legacy fallback probe: used when /api/output-pool is unavailable
+    // (e.g. running against an older server that hasn't been restarted yet).
+    const LEGACY_CANDIDATES = [
+      { name: 'index.html', kind: 'html' },
+      { name: 'output.html', kind: 'html' },
+      { name: 'figure.html', kind: 'html' },
+      { name: 'plot.png', kind: 'image' },
+      { name: 'plot.svg', kind: 'image' },
+      { name: 'plot.jpg', kind: 'image' },
+      { name: 'output.pdf', kind: 'pdf' },
+    ];
+
+    async function fetchPool() {
+      try {
+        const res = await fetch(POOL_ENDPOINT, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const files = (data.files || []).map(f => ({ ...f, stem: f.stem || f.name.replace(/\.[^.]+$/, '') }));
+          return { files, focus: data.focus || null };
+        }
+      } catch {}
+      // Fallback: HEAD-probe the legacy candidates.
+      const files = [];
+      for (const c of LEGACY_CANDIDATES) {
+        try {
+          const head = await fetch(OUTPUT_BASE + '/' + c.name, { method: 'HEAD', cache: 'no-store' });
+          if (head.ok) {
+            const mtime = Date.parse(head.headers.get('last-modified') || '') || Date.now();
+            files.push({ name: c.name, stem: c.name.replace(/\.[^.]+$/, ''), kind: c.kind, mtime });
+          }
+        } catch {}
+      }
+      return { files, focus: null };
+    }
+
+    async function checkOutput() {
+      try {
+        const { files, focus } = await fetchPool();
+
+        // Honor programmatic focus requests (from displays.focus_display()).
+        // A new ts means the Python side asked the display to jump to a tab.
+        let focusChanged = false;
+        if (focus && focus.ts > lastFocusTs) {
+          lastFocusTs = focus.ts;
+          if (focus.stem) { activeStem = focus.stem; focusChanged = true; }
+        }
+
+        if (files.length === 0) {
+          showEmpty();
+          return;
+        }
+
+        // Key includes mtime so content overwrites force a refresh even when
+        // the filename list is unchanged. Previously this bug caused
+        // show_figure() → show_figure() to silently skip the second reload.
+        const key = files.map(f => `${f.name}:${f.mtime}`).join(',');
+        if (key === lastKey && !focusChanged) return;
+        lastKey = key;
+        currentFiles = files;
+
+        // Preserve active tab across updates. activeStem is sticky on the
+        // user's last explicit choice (click or focus_display) — we only
+        // seed it on the first render before the user has picked. If the
+        // chosen tab is transiently missing from this poll (e.g. during an
+        // atomic rename), render a fallback without clobbering activeStem;
+        // when the file reappears on the next poll, the user's selection is
+        // restored automatically.
+        let active = activeStem ? files.find(f => f.stem === activeStem) : null;
+        if (!active) active = files.find(f => f.name === 'index.html') || files[0];
+        if (activeStem === null) activeStem = active.stem;
+
+        renderTabs(files, active);
+      } catch {}
+    }
+
+    function showEmpty() {
+      document.getElementById('empty').style.display = 'flex';
+      document.getElementById('content-frame').style.display = 'none';
+      document.getElementById('image-view').style.display = 'none';
+      document.getElementById('tab-bar').classList.remove('visible');
+      lastKey = null;
+      // Deliberately NOT resetting activeStem. If the pool is transiently
+      // empty (every file atomic-renamed in the same poll, or clear() was
+      // called but something is about to repopulate), we want the next
+      // non-empty poll to restore the user's previous tab selection. If
+      // the emptiness is permanent, activeStem falls out of currentFiles
+      // anyway and the fallback path in checkOutput picks a new tab.
+    }
+
+    function renderTabs(files, active) {
+      document.getElementById('empty').style.display = 'none';
+      const tabBar = document.getElementById('tab-bar');
+
+      if (files.length <= 1) {
+        tabBar.classList.remove('visible');
+        tabBar.innerHTML = '';
+      } else {
+        tabBar.classList.add('visible');
+        tabBar.innerHTML = '';
+        files.forEach((file, i) => {
+          const tab = document.createElement('button');
+          tab.className = 'tab' + (file === active ? ' active' : '');
+          tab.dataset.stem = file.stem;
+          tab.innerHTML = '<span class="tab-name">' + friendlyName(file) + '</span>'
+            + (i < 9 ? '<span class="tab-key">' + (i + 1) + '</span>' : '');
+          tab.onclick = () => switchTo(file.stem);
+          tabBar.appendChild(tab);
+        });
+      }
+
+      showFile(active);
+    }
+
+    function switchTo(stem) {
+      const file = currentFiles.find(f => f.stem === stem);
+      if (!file) return;
+      activeStem = stem;
+      // Update tab-active state without re-fetching
+      document.querySelectorAll('.tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.stem === stem);
+      });
+      showFile(file);
+      reportUserFocus(stem);
+    }
+
+    // Tell the server which tab the user is actually on. POSTed only on
+    // user-initiated switches (click, keyboard) — NOT on programmatic
+    // focus_display() takes. The asymmetry is the point: if the agent
+    // focuses "training" and the user clicks "architecture", userFocus
+    // becomes "architecture" so the agent can tell.
+    function reportUserFocus(stem) {
+      try {
+        fetch('/api/display-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stem }),
+          keepalive: true,
+        }).catch(() => {});
+      } catch {}
+    }
+
+    function showFile(file) {
+      const emptyEl = document.getElementById('empty');
+      const frame = document.getElementById('content-frame');
+      const imgView = document.getElementById('image-view');
+
+      emptyEl.style.display = 'none';
+
+      if (file.kind === 'html' || file.kind === 'pdf') {
+        imgView.style.display = 'none';
+        frame.style.display = 'block';
+        frame.src = cacheBust(file.name, file.mtime);
+      } else if (file.kind === 'image') {
+        frame.style.display = 'none';
+        imgView.style.display = 'block';
+        imgView.classList.remove('zoomed');
+        imgView.innerHTML = '<img src="' + cacheBust(file.name, file.mtime) + '" alt="Output">';
+      }
+    }
+
+    // Click image to toggle between fit-to-width and natural size.
+    document.getElementById('image-view').addEventListener('click', (e) => {
+      if (e.target.tagName !== 'IMG') return;
+      e.currentTarget.classList.toggle('zoomed');
+    });
+
+    // ── Polling + message-driven reload ────────────────
+    checkOutput();
+    setInterval(checkOutput, 1500);
+
+    window.addEventListener('message', (e) => {
+      const data = e.data;
+      if (data === 'reload') {
+        lastKey = null;
+        checkOutput();
+        return;
+      }
+      // Keybind routing from parent shell
+      if (data && typeof data === 'object' && data.type === 'triptych-key') {
+        handleKey(data.action);
+      }
+    });
+
+    function handleKey(action) {
+      if (!currentFiles.length) return;
+      const idx = currentFiles.findIndex(f => f.stem === activeStem);
+      if (idx === -1) return;
+
+      if (action === 'prev-tab') {
+        const next = (idx - 1 + currentFiles.length) % currentFiles.length;
+        switchTo(currentFiles[next].stem);
+      } else if (action === 'next-tab') {
+        const next = (idx + 1) % currentFiles.length;
+        switchTo(currentFiles[next].stem);
+      } else if (action === 'tab-1' || action === 'tab-2' || action === 'tab-3') {
+        const n = parseInt(action.slice(4), 10) - 1;
+        if (n >= 0 && n < currentFiles.length) {
+          switchTo(currentFiles[n].stem);
+        }
+      }
+    }
+  </script>
+</body>
+</html>

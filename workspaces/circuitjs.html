@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CircuitJS</title>
+  <link rel="stylesheet" href="/core/theme.css">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--void); color: var(--text-hi); font-family: var(--font); font-size: 12px; }
+    #app { display: flex; flex-direction: column; height: 100%; }
+    #bar {
+      flex: 0 0 auto;
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface);
+      font-size: 11px; color: var(--text-mid);
+    }
+    #bar .title { color: var(--text-hi); font-weight: 500; }
+    #bar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
+    #bar .dot.ok { background: var(--accent); }
+    #bar .note { margin-left: auto; color: var(--text-dim); }
+    #bar a { color: var(--text-mid); text-decoration: none; border-bottom: 1px dotted var(--text-dim); }
+    #bar a:hover { color: var(--text-hi); }
+    #frame { flex: 1; width: 100%; border: none; background: #fff; }
+    #overlay {
+      position: absolute; inset: 30px 0 0 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--void); color: var(--text-mid); font-size: 13px;
+      pointer-events: none; opacity: 1; transition: opacity 0.3s ease;
+    }
+    #overlay.hidden { opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="bar">
+      <span class="dot" id="status-dot"></span>
+      <span class="title">CircuitJS</span>
+      <span id="status-text">loading remote iframe…</span>
+      <span class="note">hosted by <a href="https://www.falstad.com/circuit/" target="_blank" rel="noopener">falstad.com</a></span>
+    </div>
+    <iframe id="frame" src="https://www.falstad.com/circuit/circuitjs.html"></iframe>
+    <div id="overlay">connecting to falstad.com…</div>
+  </div>
+
+  <script src="/core/capture.js"></script>
+  <script>
+    // Same-origin postMessage bridge to the Falstad iframe. Falstad exposes a
+    // small command vocabulary we can use to read/write the circuit, run the
+    // simulator, and export waveform data. Details on the command set vary
+    // across Falstad forks; we keep the shape generic and surface whatever
+    // the upstream supports. If a command isn't recognized, we just log it.
+    //
+    // This file is the workspace side. A paired Python-side integration
+    // lives in integrations/circuitjs.py; a display addon lives in
+    // displays/circuitjs.py.
+
+    (function () {
+      var FALSTAD_ORIGIN = 'https://www.falstad.com';
+      var frame = document.getElementById('frame');
+      var statusDot = document.getElementById('status-dot');
+      var statusText = document.getElementById('status-text');
+      var overlay = document.getElementById('overlay');
+      var frameReady = false;
+
+      frame.addEventListener('load', function () {
+        frameReady = true;
+        statusDot.classList.add('ok');
+        statusText.textContent = 'ready';
+        overlay.classList.add('hidden');
+      });
+
+      // Expose a small bridge on window so the parent (or devtools) can drive
+      // the iframe. These are the four hand-offs the dashboard integration
+      // typically uses.
+      window.TriptychCircuit = {
+        ready: function () { return frameReady; },
+        getCircuit: function () {
+          if (!frameReady) return null;
+          frame.contentWindow.postMessage({ cmd: 'getCircuit' }, FALSTAD_ORIGIN);
+        },
+        setCircuit: function (text) {
+          if (!frameReady) return;
+          frame.contentWindow.postMessage({ cmd: 'setCircuit', text: text }, FALSTAD_ORIGIN);
+        },
+        run: function () {
+          if (!frameReady) return;
+          frame.contentWindow.postMessage({ cmd: 'run' }, FALSTAD_ORIGIN);
+        },
+        exportWaveform: function () {
+          if (!frameReady) return;
+          frame.contentWindow.postMessage({ cmd: 'exportWaveform' }, FALSTAD_ORIGIN);
+        },
+      };
+
+      // Pass responses back to any listener (currently: browser console).
+      // Write a workspace file if we get a waveform export so Python can pick
+      // it up. Route through Triptych's capture endpoint once that's wired.
+      window.addEventListener('message', function (ev) {
+        if (!ev || !ev.data) return;
+        // Only trust the Falstad iframe. Anything else posting to this window
+        // is ignored — matters once the POST-to-/api/files path is wired.
+        if (ev.origin !== FALSTAD_ORIGIN) return;
+        if (ev.data.cmd === 'waveform' && ev.data.payload) {
+          console.log('[circuitjs] waveform received, bytes:',
+            (typeof ev.data.payload === 'string' ? ev.data.payload.length : 0));
+          // Future: POST to /api/files or write via existing capture channel
+          // so integrations/circuitjs.py can pick it up off disk.
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

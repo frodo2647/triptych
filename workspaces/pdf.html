@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Viewer</title>
+  <link rel="stylesheet" href="/core/theme.css">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--void); color: var(--text-hi); font-family: var(--font); font-size: 12px; }
+    #app { display: flex; flex-direction: column; height: 100%; }
+    #pdf-frame { flex: 1; width: 100%; border: none; }
+    #loading {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--void); color: var(--text-mid); font-size: 13px; z-index: 100;
+    }
+    #loading.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="loading">Looking for PDFs...</div>
+    <iframe id="pdf-frame" src="about:blank"></iframe>
+  </div>
+
+  <script src="/core/capture.js"></script>
+  <script>
+    (async function() {
+      var loading = document.getElementById('loading');
+      var pdfFrame = document.getElementById('pdf-frame');
+      var currentFileName = '';
+
+      var params = new URLSearchParams(location.search);
+      var fileParam = params.get('file');
+
+      function loadPdf(url, name) {
+        currentFileName = name || 'document.pdf';
+        pdfFrame.src = url;
+        loading.classList.add('hidden');
+      }
+
+      // Capture integration — sends filename context, screenshot via default html2canvas
+      Capture.init({
+        interval: 30000,
+        getContext: function() {
+          return {
+            workspace: 'pdf',
+            fileName: currentFileName,
+          };
+        },
+      });
+
+      // Commands — text extraction done server-side via Python
+      Capture.registerCommands({
+        'get-filename': function() {
+          return { fileName: currentFileName };
+        },
+      });
+
+      // Init — find and load a PDF
+      if (fileParam) {
+        loadPdf('/api/files/files/' + encodeURIComponent(fileParam), fileParam);
+      } else {
+        try {
+          var res = await fetch('/api/browse');
+          var data = await res.json();
+          var pdf = (data.entries || []).find(function(e) { return e.ext === '.pdf'; });
+          if (pdf) {
+            loadPdf('/api/files/files/' + encodeURIComponent(pdf.name), pdf.name);
+          } else {
+            loading.textContent = 'No PDFs found. Drop a PDF into workspace/files/.';
+          }
+        } catch(e) {
+          loading.textContent = 'Drop a PDF into workspace/files/ to get started.';
+        }
+      }
+    })();
+  </script>
+</body>
+</html>

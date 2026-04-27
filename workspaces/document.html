@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document Editor</title>
+  <link rel="stylesheet" href="/core/theme.css">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--void); color: var(--text-hi); font-family: var(--font); }
+    #app { display: flex; flex-direction: column; height: 100%; }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+      padding: var(--space-xs) var(--space-sm);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .toolbar button {
+      background: transparent; border: 1px solid transparent; border-radius: 3px;
+      color: var(--text-mid); cursor: pointer; padding: 4px 7px;
+      font-family: var(--font); font-size: 12px; line-height: 1;
+      transition: all var(--duration-fast);
+    }
+    .toolbar button:hover { background: var(--surface-2); color: var(--text-hi); }
+    .toolbar button.active { background: var(--accent-surface); color: var(--accent); border-color: var(--accent); }
+    .toolbar .sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+    .toolbar select {
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 3px;
+      color: var(--text-hi); font-family: var(--font); font-size: 11px;
+      padding: 3px 4px; cursor: pointer; outline: none;
+    }
+
+    /* ── Editor ── */
+    .editor-wrap {
+      flex: 1; overflow-y: auto; padding: var(--space-xl) var(--space-3xl);
+      background: var(--void);
+    }
+    .tiptap {
+      outline: none; min-height: 300px;
+      font-family: var(--font); font-size: 15px; line-height: 1.7;
+      color: var(--text-hi); max-width: 720px; margin: 0 auto;
+    }
+    .tiptap p { margin-bottom: 0.5em; }
+    .tiptap h1 { font-size: 2em; font-weight: 600; margin: 1em 0 0.4em; color: var(--text-hi); }
+    .tiptap h2 { font-size: 1.5em; font-weight: 600; margin: 0.8em 0 0.3em; color: var(--text-hi); }
+    .tiptap h3 { font-size: 1.2em; font-weight: 500; margin: 0.6em 0 0.3em; color: var(--text-hi); }
+    .tiptap ul, .tiptap ol { padding-left: 1.5em; margin-bottom: 0.5em; }
+    .tiptap li { margin-bottom: 0.2em; }
+    .tiptap blockquote {
+      border-left: 3px solid var(--accent); padding-left: 1em;
+      color: var(--text-mid); margin: 0.5em 0; font-style: italic;
+    }
+    .tiptap code {
+      background: var(--surface-2); padding: 2px 5px; border-radius: 3px;
+      font-family: var(--font-mono); font-size: 0.9em; color: var(--accent);
+    }
+    .tiptap pre {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      padding: var(--space-md); margin: 0.5em 0; overflow-x: auto;
+    }
+    .tiptap pre code { background: none; padding: 0; color: var(--text-hi); }
+    .tiptap hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
+    .tiptap strong { font-weight: 600; }
+    .tiptap em { font-style: italic; }
+    .tiptap u { text-decoration: underline; }
+    .tiptap s { text-decoration: line-through; color: var(--text-dim); }
+    .tiptap a { color: var(--accent); text-decoration: underline; }
+    .tiptap img { max-width: 100%; border-radius: 4px; margin: 0.5em 0; }
+    .tiptap mark { background: rgba(204, 122, 88, 0.3); color: var(--text-hi); padding: 1px 2px; border-radius: 2px; }
+
+    /* Tables */
+    .tiptap table { border-collapse: collapse; margin: 0.5em 0; width: 100%; }
+    .tiptap th, .tiptap td {
+      border: 1px solid var(--border); padding: var(--space-xs) var(--space-sm);
+      text-align: left; vertical-align: top;
+    }
+    .tiptap th { background: var(--surface-2); font-weight: 500; }
+
+    /* Task list */
+    .tiptap ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+    .tiptap ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 6px; }
+    .tiptap ul[data-type="taskList"] li label { flex-shrink: 0; margin-top: 3px; }
+    .tiptap ul[data-type="taskList"] li[data-checked="true"] > div > p { color: var(--text-dim); text-decoration: line-through; }
+
+    /* Placeholder */
+    .tiptap p.is-editor-empty:first-child::before {
+      content: attr(data-placeholder);
+      color: var(--text-dim); float: left; height: 0; pointer-events: none;
+    }
+
+    /* ── Status bar ── */
+    .statusbar {
+      display: flex; align-items: center; gap: var(--space-md);
+      padding: var(--space-xs) var(--space-md);
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      font-size: var(--text-xs); color: var(--text-dim);
+      flex-shrink: 0;
+    }
+    .statusbar .save-status { margin-left: auto; }
+    .statusbar .save-status.saving { color: var(--yellow); }
+    .statusbar .save-status.saved { color: var(--green); }
+
+    .loading-screen {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--void); color: var(--text-mid); font-size: 13px; z-index: 100;
+    }
+    .loading-screen.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="loading-screen" id="loading">Loading editor...</div>
+
+    <!-- Toolbar -->
+    <div class="toolbar" id="toolbar">
+      <select id="headingSelect" onchange="setHeading(this.value)">
+        <option value="p">Paragraph</option>
+        <option value="1">Heading 1</option>
+        <option value="2">Heading 2</option>
+        <option value="3">Heading 3</option>
+      </select>
+      <div class="sep"></div>
+      <button data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+      <button data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+      <button data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+      <button data-cmd="strike" title="Strikethrough"><s>S</s></button>
+      <button data-cmd="highlight" title="Highlight">H</button>
+      <div class="sep"></div>
+      <button data-cmd="bulletList" title="Bullet list">&#8226; List</button>
+      <button data-cmd="orderedList" title="Numbered list">1. List</button>
+      <button data-cmd="taskList" title="Task list">&#9745; Tasks</button>
+      <div class="sep"></div>
+      <button data-cmd="blockquote" title="Quote">&#8220; Quote</button>
+      <button data-cmd="codeBlock" title="Code block">&lt;/&gt;</button>
+      <button data-cmd="horizontalRule" title="Horizontal rule">&#8212;</button>
+      <div class="sep"></div>
+      <button data-cmd="table" title="Insert table">Table</button>
+      <button data-cmd="undo" title="Undo (Ctrl+Z)">&#8617;</button>
+      <button data-cmd="redo" title="Redo (Ctrl+Shift+Z)">&#8618;</button>
+    </div>
+
+    <!-- Editor -->
+    <div class="editor-wrap">
+      <div id="editor"></div>
+    </div>
+
+    <!-- Status bar -->
+    <div class="statusbar">
+      <span id="fileName">untitled.html</span>
+      <span id="wordCount">0 words</span>
+      <span class="save-status" id="saveStatus">Ready</span>
+    </div>
+  </div>
+
+  <script src="/core/capture.js"></script>
+  <script type="module">
+    // ── Import TipTap from CDN ──
+    import { Editor } from 'https://esm.sh/@tiptap/core@2';
+    import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2';
+    import Underline from 'https://esm.sh/@tiptap/extension-underline@2';
+    import Highlight from 'https://esm.sh/@tiptap/extension-highlight@2';
+    import TaskList from 'https://esm.sh/@tiptap/extension-task-list@2';
+    import TaskItem from 'https://esm.sh/@tiptap/extension-task-item@2';
+    import Table from 'https://esm.sh/@tiptap/extension-table@2';
+    import TableRow from 'https://esm.sh/@tiptap/extension-table-row@2';
+    import TableCell from 'https://esm.sh/@tiptap/extension-table-cell@2';
+    import TableHeader from 'https://esm.sh/@tiptap/extension-table-header@2';
+    import TextAlign from 'https://esm.sh/@tiptap/extension-text-align@2';
+    import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2';
+    import Image from 'https://esm.sh/@tiptap/extension-image@2';
+
+    // ── State ──
+    let fileName = 'untitled.html';
+    let saveTimer = null;
+
+    const params = new URLSearchParams(location.search);
+    const fileParam = params.get('file');
+    if (fileParam) fileName = fileParam;
+
+    document.getElementById('fileName').textContent = fileName;
+
+    // ── Create editor ──
+    const editor = new Editor({
+      element: document.getElementById('editor'),
+      extensions: [
+        StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+        Underline,
+        Highlight.configure({ multicolor: false }),
+        TaskList,
+        TaskItem.configure({ nested: true }),
+        Table.configure({ resizable: true }),
+        TableRow,
+        TableCell,
+        TableHeader,
+        TextAlign.configure({ types: ['heading', 'paragraph'] }),
+        Placeholder.configure({ placeholder: 'Start writing...' }),
+        Image,
+      ],
+      content: '<p></p>',
+      autofocus: true,
+      onUpdate: () => {
+        updateWordCount();
+        debounceSave();
+        updateToolbarState();
+      },
+      onSelectionUpdate: () => {
+        updateToolbarState();
+      },
+    });
+
+    // ── Load file content ──
+    async function loadFile() {
+      if (!fileParam) { hideLoading(); return; }
+      try {
+        const res = await fetch('/api/files/files/' + encodeURIComponent(fileName));
+        if (res.ok) {
+          const html = await res.text();
+          editor.commands.setContent(html);
+        }
+      } catch (e) {
+        console.error('Failed to load file:', e);
+      }
+      hideLoading();
+    }
+
+    function hideLoading() {
+      document.getElementById('loading').classList.add('hidden');
+    }
+
+    // ── Auto-save ──
+    function debounceSave() {
+      document.getElementById('saveStatus').textContent = 'Unsaved';
+      document.getElementById('saveStatus').className = 'save-status';
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveFile, 1000);
+    }
+
+    async function saveFile() {
+      const el = document.getElementById('saveStatus');
+      el.textContent = 'Saving...';
+      el.className = 'save-status saving';
+      try {
+        await fetch('/api/files/files/' + encodeURIComponent(fileName), {
+          method: 'PUT',
+          body: editor.getHTML(),
+        });
+        el.textContent = 'Saved';
+        el.className = 'save-status saved';
+      } catch {
+        el.textContent = 'Save failed';
+        el.className = 'save-status';
+      }
+    }
+
+    // ── Word count ──
+    function updateWordCount() {
+      const text = editor.getText();
+      const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+      document.getElementById('wordCount').textContent = words + ' words';
+    }
+
+    // ── Toolbar ──
+    document.querySelectorAll('.toolbar button[data-cmd]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cmd = btn.dataset.cmd;
+        switch (cmd) {
+          case 'bold': editor.chain().focus().toggleBold().run(); break;
+          case 'italic': editor.chain().focus().toggleItalic().run(); break;
+          case 'underline': editor.chain().focus().toggleUnderline().run(); break;
+          case 'strike': editor.chain().focus().toggleStrike().run(); break;
+          case 'highlight': editor.chain().focus().toggleHighlight().run(); break;
+          case 'bulletList': editor.chain().focus().toggleBulletList().run(); break;
+          case 'orderedList': editor.chain().focus().toggleOrderedList().run(); break;
+          case 'taskList': editor.chain().focus().toggleTaskList().run(); break;
+          case 'blockquote': editor.chain().focus().toggleBlockquote().run(); break;
+          case 'codeBlock': editor.chain().focus().toggleCodeBlock().run(); break;
+          case 'horizontalRule': editor.chain().focus().setHorizontalRule().run(); break;
+          case 'table': editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(); break;
+          case 'undo': editor.chain().focus().undo().run(); break;
+          case 'redo': editor.chain().focus().redo().run(); break;
+        }
+      });
+    });
+
+    function setHeading(val) {
+      editor.chain().focus();
+      if (val === 'p') {
+        editor.chain().focus().setParagraph().run();
+      } else {
+        editor.chain().focus().toggleHeading({ level: parseInt(val) }).run();
+      }
+    }
+    window.setHeading = setHeading;
+
+    function updateToolbarState() {
+      document.querySelectorAll('.toolbar button[data-cmd]').forEach(btn => {
+        const cmd = btn.dataset.cmd;
+        let active = false;
+        try {
+          switch (cmd) {
+            case 'bold': active = editor.isActive('bold'); break;
+            case 'italic': active = editor.isActive('italic'); break;
+            case 'underline': active = editor.isActive('underline'); break;
+            case 'strike': active = editor.isActive('strike'); break;
+            case 'highlight': active = editor.isActive('highlight'); break;
+            case 'bulletList': active = editor.isActive('bulletList'); break;
+            case 'orderedList': active = editor.isActive('orderedList'); break;
+            case 'taskList': active = editor.isActive('taskList'); break;
+            case 'blockquote': active = editor.isActive('blockquote'); break;
+            case 'codeBlock': active = editor.isActive('codeBlock'); break;
+          }
+        } catch {}
+        btn.classList.toggle('active', active);
+      });
+
+      // Update heading dropdown
+      const sel = document.getElementById('headingSelect');
+      if (editor.isActive('heading', { level: 1 })) sel.value = '1';
+      else if (editor.isActive('heading', { level: 2 })) sel.value = '2';
+      else if (editor.isActive('heading', { level: 3 })) sel.value = '3';
+      else sel.value = 'p';
+    }
+
+    // ── Claude commands ──
+    Capture.init({
+      interval: 30000,
+      getContext() {
+        const text = editor.getText();
+        return {
+          workspace: 'document',
+          fileName,
+          content: text.slice(0, 2000),
+          wordCount: text.trim() ? text.trim().split(/\s+/).length : 0,
+          selectedText: '',
+        };
+      },
+    });
+
+    Capture.registerCommands({
+      'get-content'() {
+        return { html: editor.getHTML(), text: editor.getText(), fileName };
+      },
+      'set-content'(params) {
+        const content = params.html || params.content || params.markdown || '';
+        editor.commands.setContent(content);
+        return { ok: true };
+      },
+      'insert-content'(params) {
+        const content = params.html || params.content || params.text || '';
+        if (params.position !== undefined) {
+          editor.commands.insertContentAt(params.position, content);
+        } else {
+          editor.commands.insertContent(content);
+        }
+        return { ok: true };
+      },
+      'replace-selection'(params) {
+        const content = params.html || params.content || params.text || '';
+        editor.chain().focus().deleteSelection().insertContent(content).run();
+        return { ok: true };
+      },
+      'get-selection'() {
+        const { from, to } = editor.state.selection;
+        const text = editor.state.doc.textBetween(from, to);
+        return { selectedText: text, from, to };
+      },
+      'get-json'() {
+        return { json: editor.getJSON(), fileName };
+      },
+      'open-file': async function(params) {
+        const name = params.fileName || params.file;
+        if (!name) return { error: 'No file specified' };
+        fileName = name;
+        document.getElementById('fileName').textContent = fileName;
+        try {
+          const res = await fetch('/api/files/files/' + encodeURIComponent(name));
+          if (res.ok) {
+            const html = await res.text();
+            editor.commands.setContent(html);
+            return { ok: true, fileName: name };
+          }
+          return { error: 'File not found' };
+        } catch (e) {
+          return { error: e.message };
+        }
+      },
+      'list-files': async function() {
+        const res = await fetch('/api/browse');
+        const data = await res.json();
+        const files = (data.entries || []).filter(e => e.ext === '.html' || e.ext === '.htm');
+        return { files: files.map(f => f.name) };
+      },
+    });
+
+    // ── Init ──
+    loadFile();
+  </script>
+</body>
+</html>

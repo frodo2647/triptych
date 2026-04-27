@@ -1,0 +1,16 @@
+services:
+  triptych:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./workspace:/app/workspace
+      - ./workspaces:/app/workspaces
+      - ./displays:/app/displays
+      - ./core:/app/core
+      - ./.claude:/app/.claude
+      - ./CLAUDE.md:/app/CLAUDE.md
+      - ./tools.md:/app/tools.md
+    env_file: .env
+    stdin_open: true
+    tty: true
