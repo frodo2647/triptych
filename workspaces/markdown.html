@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Markdown Editor</title>
+  <link rel="stylesheet" href="/core/theme.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--void); color: var(--text-hi); font-family: var(--font); font-size: 14px; }
+
+    #app { display: flex; flex-direction: column; height: 100%; }
+
+    #toolbar {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      background: var(--chrome);
+      border-bottom: 1px solid var(--seam);
+      flex-shrink: 0;
+      user-select: none;
+    }
+    #toolbar .filename { color: var(--blue); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #toolbar .info { color: var(--text-mid); font-size: 10px; }
+    #toolbar .saved { color: var(--green); font-size: 10px; opacity: 0; transition: opacity 0.3s; }
+    #toolbar .saved.show { opacity: 1; }
+
+    /* Editor area */
+    #editor-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 40px;
+    }
+    #editor-container::-webkit-scrollbar { width: 8px; }
+    #editor-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    #editor-container::-webkit-scrollbar-track { background: var(--void); }
+
+    /* Milkdown / ProseMirror styling */
+    .milkdown .editor {
+      outline: none;
+      min-height: 200px;
+    }
+
+    .milkdown .editor h1 { font-size: 28px; font-weight: 500; color: var(--text-hi); margin: 24px 0 12px; line-height: 1.2; }
+    .milkdown .editor h2 { font-size: 22px; font-weight: 500; color: var(--text-hi); margin: 20px 0 10px; line-height: 1.3; }
+    .milkdown .editor h3 { font-size: 18px; font-weight: 500; color: var(--text-hi); margin: 16px 0 8px; line-height: 1.4; }
+    .milkdown .editor h4, .milkdown .editor h5, .milkdown .editor h6 { font-size: 15px; font-weight: 500; color: var(--text-mid); margin: 12px 0 6px; }
+
+    .milkdown .editor p { margin: 8px 0; line-height: 1.6; color: var(--text-hi); }
+
+    .milkdown .editor strong { color: var(--text-hi); font-weight: 500; }
+    .milkdown .editor em { color: var(--text-mid); font-style: italic; }
+    .milkdown .editor code {
+      background: var(--surface-2);
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-family: var(--font-mono);
+      font-size: 0.9em;
+      color: var(--accent);
+    }
+
+    .milkdown .editor pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin: 12px 0;
+      overflow-x: auto;
+    }
+    .milkdown .editor pre code {
+      background: transparent;
+      padding: 0;
+      color: var(--text-hi);
+      font-size: 13px;
+    }
+
+    .milkdown .editor blockquote {
+      border-left: 1px solid var(--accent);
+      padding-left: 16px;
+      margin: 12px 0;
+      color: var(--text-mid);
+    }
+
+    .milkdown .editor ul, .milkdown .editor ol {
+      padding-left: 24px;
+      margin: 8px 0;
+    }
+    .milkdown .editor li { margin: 4px 0; line-height: 1.5; }
+    .milkdown .editor li::marker { color: var(--text-dim); }
+
+    .milkdown .editor a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+
+    .milkdown .editor hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 20px 0;
+    }
+
+    .milkdown .editor img {
+      max-width: 100%;
+      border-radius: 4px;
+      margin: 8px 0;
+    }
+
+    /* Table styling */
+    .milkdown .editor table {
+      border-collapse: collapse;
+      margin: 12px 0;
+      width: 100%;
+    }
+    .milkdown .editor th, .milkdown .editor td {
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      text-align: left;
+    }
+    .milkdown .editor th { background: var(--surface); color: var(--text-mid); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+    /* Task list */
+    .milkdown .editor .task-list-item { list-style: none; margin-left: -20px; }
+    .milkdown .editor .task-list-item input[type="checkbox"] { margin-right: 6px; }
+
+    /* Math block */
+    .milkdown .editor .math-display { text-align: center; margin: 16px 0; }
+
+    /* Loading */
+    #loading {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--void); color: var(--text-mid); font-size: 13px; z-index: 100;
+    }
+    #loading.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="loading">Loading editor...</div>
+    <div id="toolbar">
+      <span class="filename" id="filename">untitled.md</span>
+      <span style="flex:1"></span>
+      <span class="info" id="word-count">0 words</span>
+      <span class="saved" id="save-indicator">saved</span>
+    </div>
+    <div id="editor-container"></div>
+  </div>
+
+  <script src="/core/capture.js"></script>
+  <script type="module">
+    // ── Load Milkdown from CDN ─────────────────────────────
+    const loading = document.getElementById('loading');
+    let editor = null;
+    let currentFileName = 'untitled.md';
+    let saveTimer = null;
+    let lastContent = '';
+
+    try {
+      const { Editor, rootCtx, defaultValueCtx } = await import('https://esm.sh/@milkdown/kit@7/core');
+      const { commonmark } = await import('https://esm.sh/@milkdown/kit@7/preset/commonmark');
+      const { gfm } = await import('https://esm.sh/@milkdown/kit@7/preset/gfm');
+      const { history } = await import('https://esm.sh/@milkdown/kit@7/plugin/history');
+      const { listener, listenerCtx } = await import('https://esm.sh/@milkdown/kit@7/plugin/listener');
+      const { math, mathBlockSchema } = await import('https://esm.sh/@milkdown/plugin-math@7');
+
+      // Get file from URL params
+      const params = new URLSearchParams(location.search);
+      const fileParam = params.get('file');
+      let initialContent = '# Welcome\n\nStart typing...\n';
+
+      if (fileParam) {
+        currentFileName = fileParam;
+        try {
+          const res = await fetch(`/api/files/files/${encodeURIComponent(fileParam)}`);
+          if (res.ok) initialContent = await res.text();
+        } catch {}
+      }
+
+      document.getElementById('filename').textContent = currentFileName;
+      lastContent = initialContent;
+
+      // ── Create editor ────────────────────────────────────
+      editor = await Editor.make()
+        .config((ctx) => {
+          ctx.set(rootCtx, document.getElementById('editor-container'));
+          ctx.set(defaultValueCtx, initialContent);
+          ctx.get(listenerCtx).markdownUpdated((ctx, markdown, prevMarkdown) => {
+            if (markdown !== prevMarkdown) {
+              onContentChange(markdown);
+            }
+          });
+        })
+        .use(commonmark)
+        .use(gfm)
+        .use(history)
+        .use(listener)
+        .use(math)
+        .create();
+
+      loading.classList.add('hidden');
+      updateWordCount(initialContent);
+
+    } catch (err) {
+      console.error('[markdown] Failed to load editor:', err);
+      loading.textContent = 'Failed to load editor: ' + err.message;
+
+      // Fallback: simple textarea
+      loading.innerHTML = '';
+      const ta = document.createElement('textarea');
+      ta.style.cssText = 'width:100%;height:100%;background:var(--void);color:var(--text-hi);border:none;padding:24px 40px;font-family:var(--font-mono);font-size:14px;resize:none;outline:none;';
+      ta.placeholder = 'Milkdown failed to load. Using plain textarea.';
+      ta.addEventListener('input', () => onContentChange(ta.value));
+      document.getElementById('editor-container').appendChild(ta);
+      loading.classList.add('hidden');
+    }
+
+    // ── Content change handler ─────────────────────────────
+    function onContentChange(markdown) {
+      lastContent = markdown;
+      updateWordCount(markdown);
+
+      // Auto-save with debounce
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => saveFile(markdown), 1000);
+    }
+
+    function updateWordCount(md) {
+      const words = md.trim() ? md.trim().split(/\s+/).length : 0;
+      document.getElementById('word-count').textContent = words + ' words';
+    }
+
+    async function saveFile(content) {
+      try {
+        await fetch(`/api/files/files/${encodeURIComponent(currentFileName)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'text/plain' },
+          body: content,
+        });
+        const indicator = document.getElementById('save-indicator');
+        indicator.classList.add('show');
+        setTimeout(() => indicator.classList.remove('show'), 1500);
+      } catch (err) {
+        console.warn('[markdown] Save failed:', err);
+      }
+    }
+
+    // ── Get selection ──────────────────────────────────────
+    function getSelectedText() {
+      const sel = window.getSelection();
+      return sel ? sel.toString().trim() : '';
+    }
+
+    // ── Get markdown content ───────────────────────────────
+    function getMarkdown() {
+      return lastContent;
+    }
+
+    // ── Get headings ───────────────────────────────────────
+    function getHeadings(md) {
+      const lines = md.split('\n');
+      const headings = [];
+      lines.forEach((line, i) => {
+        const match = line.match(/^(#{1,6})\s+(.+)/);
+        if (match) {
+          headings.push({ level: match[1].length, text: match[2].trim(), line: i + 1 });
+        }
+      });
+      return headings;
+    }
+
+    // ── Capture integration ────────────────────────────────
+    Capture.init({
+      interval: 30000,
+      getContext: () => ({
+        workspace: 'markdown',
+        fileName: currentFileName,
+        content: lastContent.slice(0, 2000), // Truncate for snapshot
+        selectedText: getSelectedText(),
+        wordCount: lastContent.trim() ? lastContent.trim().split(/\s+/).length : 0,
+      }),
+    });
+
+    // ── Register commands ──────────────────────────────────
+    Capture.registerCommands({
+      'get-content': () => ({
+        markdown: lastContent,
+        fileName: currentFileName,
+      }),
+      'get-selection': () => ({
+        selectedText: getSelectedText(),
+      }),
+      'set-content': async (params) => {
+        const md = params.markdown || params.content || '';
+        // Reload editor with new content
+        lastContent = md;
+        if (editor && editor.destroy) {
+          // Milkdown doesn't have a simple setContent — reload the page with new content
+          await saveFile(md);
+          location.reload();
+        }
+        return { ok: true };
+      },
+      'open-file': (params) => {
+        const name = params.fileName || params.file;
+        if (name) {
+          location.href = `/workspaces/markdown.html?file=${encodeURIComponent(name)}`;
+          return { ok: true };
+        }
+        return { error: 'No fileName specified' };
+      },
+      'get-headings': () => ({
+        headings: getHeadings(lastContent),
+      }),
+      'list-files': async () => {
+        try {
+          const res = await fetch('/api/browse');
+          const data = await res.json();
+          const mdFiles = (data.entries || []).filter(e => e.ext === '.md');
+          return { files: mdFiles.map(e => e.name) };
+        } catch { return { files: [] }; }
+      },
+    });
+  </script>
+</body>
+</html>

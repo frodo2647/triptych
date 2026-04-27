@@ -1,0 +1,50 @@
+{
+  "description": "Intent-pattern -> skill map consumed by scripts/hooks/inject-skill-hints.mjs. Keep to <=10 rules so the hook stays fast and the nudges stay signal-heavy. Patterns are JavaScript regex strings, matched case-insensitively against the user's prompt. A prompt can match multiple rules; all matching hints are injected, deduped by skill name.",
+  "rules": [
+    {
+      "pattern": "\\b(derive|prove|theorem|lemma|proof|formal(ly|ize|ization))\\b",
+      "skill": "/verifier",
+      "hint": "formal work — start /loop 60s /verifier once you begin emitting claims via emit_claim()"
+    },
+    {
+      "pattern": "\\b(train|training|hpo|hyperparam|sweep|tune|tensorboard|optuna|circuit|schematic|netlist|spice|ngspice|falstad|circuitjs|embed|external tool|iframe|integrat(e|ion))\\b",
+      "skill": "/integration-design",
+      "hint": "pick embed vs external up front — EmbeddedTool or ExternalTool, see integrations/"
+    },
+    {
+      "pattern": "\\b(paper|papers|arxiv|literature|cite|citation|bibliograph)\\b",
+      "skill": "/literature-review",
+      "hint": "paper work — /literature-review has the search + synthesis flow"
+    },
+    {
+      "pattern": "\\b(display|visualiz(e|ation)|plot|chart|dashboard|panel)\\b",
+      "skill": "/display-design-workflow",
+      "hint": "display work — the six-step flow keeps residue out of workspace/output/"
+    },
+    {
+      "pattern": "\\b(watch|watching|observ(e|ing)|snapshot)\\b",
+      "skill": "/watcher",
+      "hint": "watcher mode — someone is always checking; /watcher handles human work"
+    },
+    {
+      "pattern": "\\b(autonomous|unattended|work on your own|run this alone)\\b",
+      "skill": "/autonomous",
+      "hint": "autonomous mode — verifier loop should run the whole time"
+    },
+    {
+      "pattern": "\\b(optimize|auto.?research|self.?improv|benchmark)\\b",
+      "skill": "/autoresearch",
+      "hint": "self-improvement loop — define a metric first, iterate forever"
+    },
+    {
+      "pattern": "\\b(start|set up|get started|new project|new session|new goal)\\b",
+      "skill": "/first-boot",
+      "hint": "session-start — /first-boot Stage 2 elicits goal, seeds state, primes skills"
+    },
+    {
+      "pattern": "\\b(fetch a skill|install a skill|need a skill|no skill for|missing a skill|find a skill|skill for (bio|chem|physics|EE|electronics|stats?|statistic))\\b",
+      "skill": "/skill-finder",
+      "hint": "fetch-on-demand — /skill-finder has the K-Dense + trusted-source recipe"
+    }
+  ]
+}

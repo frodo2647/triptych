@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="/core/theme.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--void); color: var(--text);
+    font-family: var(--font); font-size: 12px; line-height: 1.6;
+    padding: 20px 24px 48px;
+  }
+  html { scrollbar-color: var(--border) transparent; }
+
+  h1 { font-size: 14px; font-weight: 600; color: var(--text-hi); margin-bottom: 4px; }
+  .subtitle { color: var(--text-3); font-size: 10px; margin-bottom: 20px; }
+
+  .group { margin-bottom: 20px; }
+  .group-label {
+    font-size: 10px; font-weight: 600; color: var(--text-3);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 8px; padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .field {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 0; border-bottom: 1px solid rgba(34,34,40,0.4);
+  }
+  .field:last-child { border-bottom: none; }
+  .field-label { color: var(--text); font-size: 12px; }
+  .field-hint { color: var(--text-3); font-size: 10px; margin-top: 2px; }
+
+  .field input[type="text"], .field input[type="number"] {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); font-family: var(--font); font-size: 11px;
+    padding: 4px 8px; border-radius: 3px; width: 120px;
+    outline: none; text-align: right;
+  }
+  .field input:focus { border-color: var(--accent); }
+
+  .field select {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); font-family: var(--font); font-size: 11px;
+    padding: 4px 8px; border-radius: 3px; outline: none;
+  }
+
+  .toggle {
+    width: 32px; height: 18px; border-radius: 9px;
+    background: var(--border); border: none; cursor: pointer;
+    position: relative; transition: background 0.2s;
+  }
+  .toggle::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--text-3); transition: all 0.2s;
+  }
+  .toggle.on { background: var(--green); }
+  .toggle.on::after { left: 17px; background: #fff; }
+
+  .tag-list { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tag {
+    font-size: 10px; padding: 2px 6px; border-radius: 3px;
+    background: rgba(122,128,213,0.1); color: var(--blue);
+  }
+
+  .addon-list { display: flex; flex-direction: column; gap: 2px; }
+  .addon-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(58,51,43,0.3);
+  }
+  .addon-item:last-child { border-bottom: none; }
+  .addon-name { color: var(--text); font-size: 12px; font-weight: 500; }
+  .addon-id { color: var(--text-3); font-size: 10px; font-family: var(--font-mono); }
+  .addon-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--green); flex-shrink: 0;
+  }
+
+  .status { font-size: 10px; color: var(--text-3); margin-top: 16px; text-align: center; }
+  .status.saved { color: var(--green); }
+</style>
+</head>
+<body>
+
+<h1>Settings</h1>
+<div class="subtitle" id="filename">loading...</div>
+<div id="content"></div>
+<div class="status" id="status"></div>
+
+<script>
+(async function() {
+  const params = new URLSearchParams(location.search);
+  const fileParam = params.get('file') || 'settings.triptych';
+  document.getElementById('filename').textContent = fileParam;
+
+  let config = {};
+  let saveTimer = null;
+
+  // Load
+  try {
+    const res = await fetch(`/api/files/files/${encodeURIComponent(fileParam)}`);
+    if (res.ok) config = await res.json();
+  } catch {}
+
+  // Defaults
+  const defaults = {
+    theme: 'dark',
+    snapshotInterval: 30000,
+    autoSave: true,
+  };
+  config = { ...defaults, ...config };
+
+  // Save
+  async function save() {
+    try {
+      await fetch(`/api/files/files/${encodeURIComponent(fileParam)}`, {
+        method: 'PUT',
+        body: JSON.stringify(config, null, 2),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      showStatus('saved');
+    } catch { showStatus('save failed'); }
+  }
+
+  function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(save, 500);
+  }
+
+  function showStatus(msg) {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = msg === 'saved' ? 'status saved' : 'status';
+    setTimeout(() => { el.textContent = ''; }, 2000);
+  }
+
+  // Render
+  const content = document.getElementById('content');
+
+  function field(label, hint, inputHtml) {
+    return `<div class="field">
+      <div><div class="field-label">${label}</div>${hint ? `<div class="field-hint">${hint}</div>` : ''}</div>
+      <div>${inputHtml}</div>
+    </div>`;
+  }
+
+  function renderGroups() {
+    // Collect extra keys not in known fields
+    const known = ['theme', 'snapshotInterval', 'autoSave', 'activeSkills', 'mcpServers'];
+    const extra = Object.keys(config).filter(k => !known.includes(k));
+
+    let html = '';
+
+    // General
+    html += '<div class="group"><div class="group-label">General</div>';
+    html += field('Theme', '', `<select data-key="theme">
+      <option value="dark" ${config.theme === 'dark' ? 'selected' : ''}>Dark</option>
+      <option value="light" ${config.theme === 'light' ? 'selected' : ''}>Light</option>
+    </select>`);
+    html += field('Snapshot interval', 'ms between captures',
+      `<input type="number" value="${config.snapshotInterval}" data-key="snapshotInterval" step="5000">`);
+    html += field('Auto-save', 'Save files automatically',
+      `<button class="toggle ${config.autoSave ? 'on' : ''}" data-key="autoSave"></button>`);
+    html += '</div>';
+
+    // Skills (if present)
+    if (config.activeSkills) {
+      html += '<div class="group"><div class="group-label">Active Skills</div>';
+      html += `<div class="field"><div class="tag-list">${
+        config.activeSkills.map(s => `<span class="tag">/${s}</span>`).join('')
+      }</div></div>`;
+      html += '</div>';
+    }
+
+    // MCP servers (if present)
+    if (config.mcpServers) {
+      html += '<div class="group"><div class="group-label">MCP Servers</div>';
+      html += `<div class="field"><div class="tag-list">${
+        config.mcpServers.map(s => `<span class="tag">${s}</span>`).join('')
+      }</div></div>`;
+      html += '</div>';
+    }
+
+    // Extra keys as raw fields
+    if (extra.length) {
+      html += '<div class="group"><div class="group-label">Other</div>';
+      extra.forEach(k => {
+        const v = typeof config[k] === 'object' ? JSON.stringify(config[k]) : config[k];
+        html += field(k, '', `<input type="text" value="${v}" data-key="${k}">`);
+      });
+      html += '</div>';
+    }
+
+    // Workspaces section (fetched from API)
+    html += '<div class="group"><div class="group-label">Active Workspaces</div>';
+    html += '<div class="addon-list" id="workspace-list"><div class="field-hint">Loading...</div></div></div>';
+
+    // Displays section (fetched from API)
+    html += '<div class="group"><div class="group-label">Active Displays</div>';
+    html += '<div class="addon-list" id="display-list"><div class="field-hint">Loading...</div></div></div>';
+
+    content.innerHTML = html;
+
+    // Fetch and render addons
+    fetchAddons('/api/workspaces', 'workspace-list');
+    fetchAddons('/api/displays', 'display-list');
+
+    // Bind events
+    content.querySelectorAll('input, select').forEach(el => {
+      el.addEventListener('change', () => {
+        const key = el.dataset.key;
+        if (el.type === 'number') config[key] = parseInt(el.value) || 0;
+        else config[key] = el.value;
+        scheduleSave();
+      });
+    });
+
+    content.querySelectorAll('.toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.key;
+        config[key] = !config[key];
+        btn.classList.toggle('on', config[key]);
+        scheduleSave();
+      });
+    });
+  }
+
+  const WORKSPACE_DESC = {
+    editor: 'Code editor with syntax highlighting',
+    files: 'File browser and upload',
+    markdown: 'Rich text editor with math',
+    pdf: 'PDF viewer',
+    settings: 'Configuration panel',
+    spreadsheet: 'Grid editor with formulas',
+    tldraw: 'Drawing and whiteboard',
+  };
+
+  const DISPLAY_DESC = {
+    autoresearch: 'Experiment dashboard',
+    code: 'Syntax highlighting and diffs',
+    d3: 'Custom D3.js visualizations',
+    derivation: 'Step-by-step math proofs',
+    html: 'Custom HTML output',
+    image: 'Static images (PNG, SVG, JPG)',
+    latex: 'Math equations via KaTeX',
+    markdown: 'Rendered markdown with math',
+    matplotlib: 'Static plots and charts',
+    pdf: 'PDF rendering',
+    plotly: 'Interactive plots',
+    research: 'Research state and dependency graph',
+    table: 'Data tables and DataFrames',
+    threejs: '3D scenes, surfaces, vector fields',
+  };
+
+  async function fetchAddons(url, containerId) {
+    const container = document.getElementById(containerId);
+    const descMap = url.includes('displays') ? DISPLAY_DESC : WORKSPACE_DESC;
+    try {
+      const res = await fetch(url);
+      const items = await res.json();
+      if (!items.length) {
+        container.innerHTML = '<div class="field-hint">None found</div>';
+        return;
+      }
+      container.innerHTML = items.map(item => `
+        <div class="addon-item">
+          <span class="addon-dot"></span>
+          <span class="addon-name">${item.id}</span>
+          <span class="addon-id">${descMap[item.id] || ''}</span>
+        </div>
+      `).join('');
+    } catch {
+      container.innerHTML = '<div class="field-hint">Could not load</div>';
+    }
+  }
+
+  renderGroups();
+})();
+</script>
+
+<script src="/core/capture.js"></script>
+<script>
+  Capture.init({ interval: 30000, getContext: () => ({ workspace: 'settings' }) });
+</script>
+</body>
+</html>

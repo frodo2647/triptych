@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spreadsheet</title>
+  <link rel="stylesheet" href="/core/theme.css">
+
+  <!-- Univer CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/@univerjs/preset-sheets-core@0.20/lib/index.css">
+
+  <!-- Peer dependencies -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/rxjs@7/dist/bundles/rxjs.umd.min.js"></script>
+
+  <!-- Univer -->
+  <script src="https://unpkg.com/@univerjs/presets@0.20/lib/umd/index.js"></script>
+  <script src="https://unpkg.com/@univerjs/preset-sheets-core@0.20/lib/umd/index.js"></script>
+  <script src="https://unpkg.com/@univerjs/preset-sheets-core@0.20/lib/umd/locales/en-US.js"></script>
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--void); color: var(--text-hi); font-family: var(--font); font-size: 12px; }
+    #app { display: flex; flex-direction: column; height: 100%; }
+
+    /* Top bar */
+    .topbar {
+      height: 32px; display: flex; align-items: center; gap: 8px;
+      padding: 0 10px; background: var(--surface); border-bottom: 1px solid var(--border);
+      flex-shrink: 0; user-select: none; z-index: 10;
+    }
+    .topbar .filename { color: var(--blue); font-size: var(--text-xs); }
+    .topbar .info { color: var(--text-mid); font-size: var(--text-xs); }
+    .topbar button {
+      background: transparent; border: 1px solid var(--border); color: var(--text-hi);
+      padding: 2px 8px; border-radius: 3px; cursor: pointer; font-family: inherit; font-size: var(--text-xs);
+    }
+    .topbar button:hover { background: var(--surface-2); }
+    .topbar .saved { color: var(--green); font-size: var(--text-xs); opacity: 0; transition: opacity 0.3s; }
+    .topbar .saved.show { opacity: 1; }
+
+    /* Univer container */
+    #univer-container { flex: 1; position: relative; overflow: hidden; }
+
+    /* Loading */
+    #loading {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: var(--void); color: var(--text-mid); font-size: 13px; z-index: 200;
+    }
+    #loading.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="loading">Loading spreadsheet...</div>
+    <div class="topbar">
+      <span class="filename" id="filename">untitled.csv</span>
+      <span style="flex:1"></span>
+      <span class="info" id="size-info"></span>
+      <button id="export-btn">Export CSV</button>
+      <span class="saved" id="save-indicator">saved</span>
+    </div>
+    <div id="univer-container"></div>
+  </div>
+
+  <script src="/core/capture.js"></script>
+  <script>
+    (async function() {
+      var loading = document.getElementById('loading');
+      var currentFileName = 'untitled.csv';
+      var univerAPI = null;
+      var saveTimer = null;
+
+      var params = new URLSearchParams(location.search);
+      var fileParam = params.get('file');
+      if (fileParam) currentFileName = fileParam;
+      document.getElementById('filename').textContent = currentFileName;
+
+      // ── CSV parsing ──
+      function parseCsv(text) {
+        var lines = text.trim().split('\n');
+        return lines.map(function(line) {
+          var result = [];
+          var current = '';
+          var inQuotes = false;
+          for (var i = 0; i < line.length; i++) {
+            var ch = line[i];
+            if (ch === '"') { inQuotes = !inQuotes; }
+            else if ((ch === ',' || ch === '\t') && !inQuotes) { result.push(current.trim()); current = ''; }
+            else { current += ch; }
+          }
+          result.push(current.trim());
+          return result;
+        });
+      }
+
+      function toCsv(data) {
+        return data.map(function(row) {
+          return row.map(function(cell) {
+            var s = String(cell == null ? '' : cell);
+            return (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0)
+              ? '"' + s.replace(/"/g, '""') + '"' : s;
+          }).join(',');
+        }).join('\n');
+      }
+
+      // ── Convert 2D array to Univer cellData format ──
+      function arrayToCellData(arr) {
+        var cellData = {};
+        for (var r = 0; r < arr.length; r++) {
+          cellData[r] = {};
+          for (var c = 0; c < arr[r].length; c++) {
+            var val = arr[r][c];
+            if (val !== '' && val != null) {
+              // Try to detect numbers
+              var num = Number(val);
+              if (!isNaN(num) && val !== '') {
+                cellData[r][c] = { v: num };
+              } else {
+                cellData[r][c] = { v: val };
+              }
+            }
+          }
+        }
+        return cellData;
+      }
+
+      // ── Extract data from Univer sheet ──
+      function getSheetData() {
+        if (!univerAPI) return [];
+        var wb = univerAPI.getActiveWorkbook();
+        if (!wb) return [];
+        var ws = wb.getActiveSheet();
+        if (!ws) return [];
+
+        var range = ws.getRange(0, 0, ws.getMaxRows(), ws.getMaxColumns());
+        var values = range.getValues();
+        if (!values) return [];
+
+        // Trim trailing empty rows and columns
+        var maxRow = 0, maxCol = 0;
+        for (var r = 0; r < values.length; r++) {
+          for (var c = 0; c < values[r].length; c++) {
+            var v = values[r][c];
+            if (v != null && v !== '') {
+              if (r > maxRow) maxRow = r;
+              if (c > maxCol) maxCol = c;
+            }
+          }
+        }
+        var result = [];
+        for (var r = 0; r <= maxRow; r++) {
+          var row = [];
+          for (var c = 0; c <= maxCol; c++) {
+            var v = values[r] && values[r][c];
+            row.push(v == null ? '' : v);
+          }
+          result.push(row);
+        }
+        return result;
+      }
+
+      // ── Load file ──
+      var initialData = null;
+      if (fileParam) {
+        try {
+          var res = await fetch('/api/files/files/' + encodeURIComponent(fileParam));
+          if (res.ok) {
+            var text = await res.text();
+            var parsed = parseCsv(text);
+            if (parsed.length > 0 && parsed[0].length > 0) {
+              initialData = parsed;
+            }
+          }
+        } catch(e) { console.warn('Failed to load file:', e); }
+      }
+
+      // ── Initialize Univer ──
+      try {
+        var createUniver = UniverPresets.createUniver;
+        var LocaleType = UniverCore.LocaleType;
+        var mergeLocales = UniverCore.mergeLocales;
+        var UniverSheetsCorePreset = UniverPresetSheetsCore.UniverSheetsCorePreset;
+
+        var sheetConfig = {
+          id: 'sheet1',
+          name: 'Sheet1',
+          rowCount: Math.max(100, initialData ? initialData.length + 20 : 100),
+          columnCount: Math.max(26, initialData ? (initialData[0] || []).length + 5 : 26),
+        };
+
+        if (initialData) {
+          sheetConfig.cellData = arrayToCellData(initialData);
+        }
+
+        var result = createUniver({
+          locale: LocaleType.EN_US,
+          locales: {
+            [LocaleType.EN_US]: mergeLocales(UniverPresetSheetsCoreEnUS),
+          },
+          darkMode: true,
+          presets: [
+            UniverSheetsCorePreset({ container: 'univer-container' }),
+          ],
+        });
+
+        univerAPI = result.univerAPI;
+        univerAPI.createWorkbook({
+          name: currentFileName,
+          sheets: { sheet1: sheetConfig },
+        });
+
+        loading.classList.add('hidden');
+        updateSizeInfo();
+
+        // Listen for changes
+        univerAPI.onCommandExecuted(function(cmd) {
+          // Debounce save on any mutation
+          if (saveTimer) clearTimeout(saveTimer);
+          saveTimer = setTimeout(saveFile, 2000);
+          updateSizeInfo();
+        });
+
+      } catch(e) {
+        console.error('Univer init failed:', e);
+        loading.textContent = 'Failed to load spreadsheet: ' + e.message;
+      }
+
+      function updateSizeInfo() {
+        var data = getSheetData();
+        var rows = data.length;
+        var cols = data[0] ? data[0].length : 0;
+        document.getElementById('size-info').textContent = rows + ' x ' + cols;
+      }
+
+      // ── Save ──
+      async function saveFile() {
+        var data = getSheetData();
+        if (data.length === 0) return;
+        var csv = toCsv(data);
+        try {
+          await fetch('/api/files/files/' + encodeURIComponent(currentFileName), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'text/plain' },
+            body: csv,
+          });
+          var indicator = document.getElementById('save-indicator');
+          indicator.classList.add('show');
+          setTimeout(function() { indicator.classList.remove('show'); }, 1500);
+        } catch(e) { console.warn('Save failed:', e); }
+      }
+
+      // ── Export ──
+      document.getElementById('export-btn').addEventListener('click', function() {
+        var data = getSheetData();
+        var csv = toCsv(data);
+        var blob = new Blob([csv], { type: 'text/csv' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = currentFileName; a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      // ── Capture integration ──
+      Capture.init({
+        interval: 30000,
+        getContext: function() {
+          var data = getSheetData();
+          return {
+            workspace: 'spreadsheet',
+            fileName: currentFileName,
+            rows: data.length,
+            cols: data[0] ? data[0].length : 0,
+          };
+        },
+      });
+
+      // ── Claude commands ──
+      Capture.registerCommands({
+        'get-data': function() {
+          var data = getSheetData();
+          return { data: data, rows: data.length, cols: data[0] ? data[0].length : 0 };
+        },
+        'set-data': function(params) {
+          if (!univerAPI || !params.data) return { error: 'Invalid data' };
+          var wb = univerAPI.getActiveWorkbook();
+          var ws = wb.getActiveSheet();
+          var data = params.data;
+          for (var r = 0; r < data.length; r++) {
+            for (var c = 0; c < data[r].length; c++) {
+              ws.getRange(r, c).setValue(data[r][c]);
+            }
+          }
+          return { ok: true };
+        },
+        'get-cell': function(params) {
+          if (!univerAPI) return { error: 'Not initialized' };
+          var wb = univerAPI.getActiveWorkbook();
+          var ws = wb.getActiveSheet();
+          var val = ws.getRange(parseInt(params.row), parseInt(params.col)).getValue();
+          return { value: val };
+        },
+        'set-cell': function(params) {
+          if (!univerAPI) return { error: 'Not initialized' };
+          var wb = univerAPI.getActiveWorkbook();
+          var ws = wb.getActiveSheet();
+          ws.getRange(parseInt(params.row), parseInt(params.col)).setValue(params.value);
+          return { ok: true };
+        },
+        'batch-set-cells': function(params) {
+          if (!univerAPI || !params.updates) return { error: 'Invalid params' };
+          var wb = univerAPI.getActiveWorkbook();
+          var ws = wb.getActiveSheet();
+          var updates = params.updates;
+          for (var i = 0; i < updates.length; i++) {
+            ws.getRange(parseInt(updates[i].row), parseInt(updates[i].col)).setValue(updates[i].value);
+          }
+          return { ok: true, count: updates.length };
+        },
+        'get-selection': function() {
+          // Return current selection info
+          return { selectedRange: null };
+        },
+        'open-file': function(params) {
+          var name = params.fileName || params.file;
+          if (name) {
+            location.href = '/workspaces/spreadsheet.html?file=' + encodeURIComponent(name);
+            return { ok: true };
+          }
+          return { error: 'No fileName specified' };
+        },
+        'export-csv': async function() {
+          await saveFile();
+          return { ok: true, fileName: currentFileName };
+        },
+        'get-summary': function() {
+          var data = getSheetData();
+          var rows = data.length;
+          var cols = data[0] ? data[0].length : 0;
+          var numericCols = [];
+          for (var c = 0; c < cols; c++) {
+            var isNumeric = true;
+            for (var r = 1; r < Math.min(rows, 10); r++) {
+              if (data[r] && data[r][c] !== '' && isNaN(Number(data[r][c]))) { isNumeric = false; break; }
+            }
+            if (isNumeric) numericCols.push(c);
+          }
+          return { rows: rows, cols: cols, headers: data[0] || [], numericColumns: numericCols };
+        },
+      });
+    })();
+  </script>
+</body>
+</html>

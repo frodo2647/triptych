@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="/core/theme.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--void); color: var(--text);
+    font-family: var(--font); font-size: 12px;
+    display: flex; flex-direction: column;
+  }
+
+  /* ── Header ──────────────────────────────────── */
+  .header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .header-title {
+    font-size: 10px; font-weight: 500; color: var(--text-3);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    flex: 1;
+    display: flex; align-items: center; gap: 4px;
+    overflow: hidden;
+  }
+  .crumb {
+    background: none; border: none;
+    color: var(--text-3); cursor: pointer;
+    font-family: var(--font); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 2px 4px; border-radius: 2px;
+    transition: color 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+  .crumb:hover { color: var(--text); background: var(--surface); }
+  .crumb.current { color: var(--text); cursor: default; }
+  .crumb.current:hover { background: transparent; }
+  .crumb-sep { color: var(--text-3); opacity: 0.5; font-size: 9px; }
+  .header-btn {
+    background: none; border: 1px solid var(--border);
+    color: var(--text-2); font-family: var(--font); font-size: 10px;
+    padding: 3px 8px; border-radius: 3px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .header-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-3); }
+  .header-btn:disabled { opacity: 0.35; cursor: default; }
+
+  /* ── File list ───────────────────────────────── */
+  .file-list {
+    flex: 1; overflow-y: auto; overflow-x: hidden;
+    padding: 4px 0;
+  }
+  .file-list::-webkit-scrollbar { width: 3px; }
+  .file-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .file, .dir {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 12px; cursor: pointer;
+    transition: background 0.1s;
+  }
+  .file:hover, .dir:hover { background: var(--surface); }
+  .file-icon, .dir-icon {
+    width: 16px; height: 16px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-3);
+  }
+  .dir-icon { color: var(--accent); }
+  .file:hover { color: var(--text); }
+  .dir:hover { color: var(--text); }
+  .file-icon svg, .dir-icon svg { width: 14px; height: 14px; display: block; }
+
+  /* Muted file-type tints — legible but not shouty.
+     Pulled toward theme neutrals so the list stays calm. */
+  .file-icon.code   { color: #c4a045; }  /* python, js, ts — warm yellow */
+  .file-icon.doc    { color: #7fa8c9; }  /* md, txt — cool blue */
+  .file-icon.data   { color: #8fb87a; }  /* json, yaml, csv — green */
+  .file-icon.web    { color: #cc7a58; }  /* html, css, accent orange */
+  .file-icon.image  { color: #b080c5; }  /* png, svg — purple */
+  .file-icon.pdf    { color: #d47567; }  /* pdf — red */
+  .file-icon.math   { color: #48b5c5; }  /* tex — cyan */
+  .file-icon.sketch { color: #dbb870; }  /* tldr — warm */
+  .file-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dir-name { flex: 1; color: var(--text-2); }
+  .file-date { color: var(--text-3); font-size: 10px; min-width: 70px; text-align: right; white-space: nowrap; }
+
+  /* ── Drop zone ───────────────────────────────── */
+  .drop-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(21,18,16,0.85);
+    border: 2px dashed var(--accent);
+    z-index: 100;
+    align-items: center; justify-content: center;
+    font-size: 13px; color: var(--accent);
+  }
+  .drop-overlay.active { display: flex; }
+
+  /* ── Empty state ─────────────────────────────── */
+  .empty {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    flex: 1; color: var(--text-3); gap: 8px;
+    padding: 40px;
+  }
+  .empty-hint { font-size: 11px; }
+
+  /* ── New file dialog ─────────────────────────── */
+  .dialog-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(21,18,16,0.6); z-index: 200;
+    align-items: center; justify-content: center;
+  }
+  .dialog-overlay.active { display: flex; }
+  .dialog {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 16px; width: 280px;
+  }
+  .dialog-title {
+    font-size: 11px; font-weight: 600; color: var(--text);
+    margin-bottom: 12px;
+  }
+  .dialog input {
+    width: 100%; background: var(--void); border: 1px solid var(--border);
+    color: var(--text); font-family: var(--font); font-size: 12px;
+    padding: 6px 8px; border-radius: 4px; outline: none;
+    margin-bottom: 8px;
+  }
+  .dialog input:focus { border-color: var(--accent); }
+  .dialog-presets {
+    display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px;
+  }
+  .preset {
+    background: none; border: 1px solid var(--border);
+    color: var(--text-3); font-family: var(--font); font-size: 9px;
+    padding: 2px 6px; border-radius: 3px; cursor: pointer;
+  }
+  .preset:hover { color: var(--text); border-color: var(--text-3); }
+  .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .dialog-actions button {
+    background: none; border: 1px solid var(--border);
+    color: var(--text-2); font-family: var(--font); font-size: 10px;
+    padding: 4px 12px; border-radius: 3px; cursor: pointer;
+  }
+  .dialog-actions button:hover { color: var(--text); border-color: var(--text-3); }
+  .dialog-actions .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .dialog-actions .primary:hover { opacity: 0.9; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <button class="header-btn" id="back-btn" title="Back" disabled>←</button>
+  <span class="header-title" id="breadcrumb"></span>
+  <button class="header-btn" id="new-btn">+ New</button>
+</div>
+
+<div class="file-list" id="file-list"></div>
+
+<div class="empty" id="empty-state" style="display:none">
+  <div>No files yet</div>
+  <div class="empty-hint">Drop files here or click + New</div>
+</div>
+
+<div class="drop-overlay" id="drop-overlay">Drop files to upload</div>
+
+<div class="dialog-overlay" id="new-dialog">
+  <div class="dialog">
+    <div class="dialog-title">New file</div>
+    <div class="dialog-presets">
+      <button class="preset" data-ext=".md">Markdown</button>
+      <button class="preset" data-ext=".py">Python</button>
+      <button class="preset" data-ext=".js">JavaScript</button>
+      <button class="preset" data-ext=".tex">LaTeX</button>
+      <button class="preset" data-ext=".csv">CSV</button>
+      <button class="preset" data-ext=".tldr">Drawing</button>
+    </div>
+    <input type="text" id="new-filename" placeholder="filename.ext" autocomplete="off" spellcheck="false">
+    <div class="dialog-actions">
+      <button id="new-cancel">Cancel</button>
+      <button class="primary" id="new-create">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const EXT_MAP = {
+    '.md': 'markdown',
+    '.pdf': 'pdf',
+    '.csv': 'spreadsheet', '.tsv': 'spreadsheet',
+    '.tldr': 'tldraw',
+    '.triptych': 'settings',
+    '.doc': 'document', '.docx': 'document', '.rtf': 'document',
+    '.htm': 'document', '.html': 'document',
+  };
+
+  const FILE_TEMPLATES = {
+    '.md': '# Untitled\n\n',
+    '.py': '# untitled.py\n\n',
+    '.js': '// untitled.js\n\n',
+    '.tex': '\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n',
+    '.csv': 'col1,col2,col3\n',
+    '.tldr': '{}',
+  };
+
+  // ── Lucide SVG icons (MIT, lucide.dev). Stroke-based, currentColor. ──
+  const SVG_OPEN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
+  const SVG_CLOSE = '</svg>';
+  function svg(paths) { return SVG_OPEN + paths + SVG_CLOSE; }
+
+  const ICON = {
+    // folder (orange accent via .dir-icon)
+    folder:      svg('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>'),
+    // file-text (default) — document with lines
+    fileText:    svg('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>'),
+    // plain file (fallback)
+    file:        svg('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>'),
+    // code
+    fileCode:    svg('<path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>'),
+    // json/yaml/toml — braces
+    braces:      svg('<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>'),
+    // image
+    image:       svg('<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.83 0L6 21"/>'),
+    // spreadsheet / csv / tsv — grid
+    table:       svg('<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/>'),
+    // sigma (tex/math)
+    sigma:       svg('<path d="M18 7V4H6l6 8-6 8h12v-3"/>'),
+    // pencil (tldr drawing)
+    pencil:      svg('<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>'),
+    // settings (triptych config)
+    settings:    svg('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
+    // globe (html)
+    globe:       svg('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>'),
+    // palette (css)
+    palette:     svg('<circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2a10 10 0 1 0 0 20c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996A5.558 5.558 0 0 0 22 10.555C21.965 6.012 17.461 2 12 2z"/>'),
+    // terminal (shell)
+    terminal:    svg('<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>'),
+    // pdf — file-type with PDF label
+    filePdf:     svg('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M9 15h6"/><path d="M9 18h4"/>'),
+  };
+
+  const ICONS = {
+    '.md':       ICON.fileText,
+    '.txt':      ICON.fileText,
+    '.pdf':      ICON.filePdf,
+    '.py':       ICON.fileCode,
+    '.js':       ICON.fileCode,
+    '.ts':       ICON.fileCode,
+    '.tsx':      ICON.fileCode,
+    '.jsx':      ICON.fileCode,
+    '.sh':       ICON.terminal,
+    '.ps1':      ICON.terminal,
+    '.json':     ICON.braces,
+    '.yaml':     ICON.braces,
+    '.yml':      ICON.braces,
+    '.toml':     ICON.braces,
+    '.csv':      ICON.table,
+    '.tsv':      ICON.table,
+    '.html':     ICON.globe,
+    '.htm':      ICON.globe,
+    '.css':      ICON.palette,
+    '.tex':      ICON.sigma,
+    '.tldr':     ICON.pencil,
+    '.triptych': ICON.settings,
+    '.png':      ICON.image,
+    '.jpg':      ICON.image,
+    '.jpeg':     ICON.image,
+    '.svg':      ICON.image,
+    '.gif':      ICON.image,
+    '.webp':     ICON.image,
+  };
+  const DEFAULT_ICON = ICON.file;
+  const FOLDER_ICON = ICON.folder;
+
+  // Icon color class by extension. Kept deliberately coarse so the palette
+  // stays calm — each group uses one tint.
+  const ICON_CLASS = {
+    '.py': 'code', '.js': 'code', '.ts': 'code', '.tsx': 'code', '.jsx': 'code',
+    '.sh': 'code', '.ps1': 'code',
+    '.md': 'doc', '.txt': 'doc',
+    '.json': 'data', '.yaml': 'data', '.yml': 'data', '.toml': 'data',
+    '.csv': 'data', '.tsv': 'data',
+    '.html': 'web', '.htm': 'web', '.css': 'web',
+    '.png': 'image', '.jpg': 'image', '.jpeg': 'image',
+    '.svg': 'image', '.gif': 'image', '.webp': 'image',
+    '.pdf': 'pdf',
+    '.tex': 'math',
+    '.tldr': 'sketch',
+  };
+
+  const listEl = document.getElementById('file-list');
+  const emptyEl = document.getElementById('empty-state');
+  const breadcrumb = document.getElementById('breadcrumb');
+  const backBtn = document.getElementById('back-btn');
+
+  // Nav history: a stack of visited paths. Back pops the current, reloads the new top.
+  let navStack = [];
+
+  function currentPath() {
+    return navStack.length ? navStack[navStack.length - 1] : '';
+  }
+
+  function getExt(name) {
+    const dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(dot).toLowerCase() : '';
+  }
+
+  function getWorkspace(ext) {
+    return EXT_MAP[ext] || 'editor';
+  }
+
+  function formatDate(mtimeMs) {
+    if (!mtimeMs) return '';
+    const d = new Date(mtimeMs);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return diffMins + 'm ago';
+    if (diffHours < 24) return diffHours + 'h ago';
+    if (diffDays < 7) return diffDays + 'd ago';
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  function openFile(filePath) {
+    const ext = getExt(filePath);
+    const workspace = getWorkspace(ext);
+    window.parent.postMessage({
+      type: 'open-file',
+      workspace: workspace,
+      file: filePath,
+    }, '*');
+  }
+
+  // Navigate to a directory, pushing onto the nav stack.
+  function navigateTo(path) {
+    // Dedup consecutive same-paths (e.g. rapid re-click).
+    if (currentPath() === path) return;
+    navStack.push(path);
+    loadDir(path);
+  }
+
+  // Jump directly to a specific prefix, truncating the stack at that point.
+  // Used by breadcrumb clicks.
+  function jumpTo(path) {
+    // Find the first occurrence of this path in the stack; truncate there.
+    const idx = navStack.indexOf(path);
+    if (idx >= 0) {
+      navStack = navStack.slice(0, idx + 1);
+    } else {
+      navStack.push(path);
+    }
+    loadDir(path);
+  }
+
+  // Go back one step in visit history. If no prior visit, go to parent dir.
+  function goBack() {
+    if (navStack.length > 1) {
+      navStack.pop();
+      loadDir(currentPath());
+    } else {
+      const here = currentPath();
+      const parent = here.includes('/') ? here.substring(0, here.lastIndexOf('/')) : '';
+      if (parent !== here) {
+        navStack = [parent];
+        loadDir(parent);
+      }
+    }
+  }
+
+  async function loadDir(path) {
+    const url = path ? `/api/browse/${path}` : '/api/browse';
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      render(data.entries || [], path);
+    } catch {
+      listEl.innerHTML = '<div style="padding:20px;color:var(--text-3)">Could not load files</div>';
+    }
+  }
+
+  function renderBreadcrumb(path) {
+    breadcrumb.innerHTML = '';
+    // Root crumb
+    const root = document.createElement('button');
+    root.className = 'crumb' + (path ? '' : ' current');
+    root.textContent = 'Files';
+    root.addEventListener('click', () => { if (path) jumpTo(''); });
+    breadcrumb.appendChild(root);
+
+    if (!path) return;
+    const segs = path.split('/');
+    let accum = '';
+    segs.forEach((seg, i) => {
+      const sep = document.createElement('span');
+      sep.className = 'crumb-sep';
+      sep.textContent = '/';
+      breadcrumb.appendChild(sep);
+
+      accum = accum ? accum + '/' + seg : seg;
+      const btn = document.createElement('button');
+      const isLast = (i === segs.length - 1);
+      btn.className = 'crumb' + (isLast ? ' current' : '');
+      btn.textContent = seg;
+      if (!isLast) {
+        const target = accum;
+        btn.addEventListener('click', () => jumpTo(target));
+      }
+      breadcrumb.appendChild(btn);
+    });
+  }
+
+  function render(entries, path) {
+    listEl.innerHTML = '';
+    renderBreadcrumb(path);
+    backBtn.disabled = (navStack.length <= 1) && !path;
+
+    if (entries.length === 0) {
+      listEl.style.display = path ? 'block' : 'none';
+      emptyEl.style.display = path ? 'none' : 'flex';
+      return;
+    }
+    listEl.style.display = 'block';
+    emptyEl.style.display = 'none';
+
+    const dirs = entries.filter(e => e.type === 'dir').sort((a, b) => a.name.localeCompare(b.name));
+    const files = entries.filter(e => e.type !== 'dir' && !e.name.startsWith('.')).sort((a, b) => a.name.localeCompare(b.name));
+
+    dirs.forEach(d => {
+      const el = document.createElement('div');
+      el.className = 'dir';
+      el.innerHTML =
+        '<span class="dir-icon">' + FOLDER_ICON + '</span>' +
+        '<span class="dir-name"></span>' +
+        '<span class="file-date"></span>';
+      el.querySelector('.dir-name').textContent = d.name;
+      el.querySelector('.file-date').textContent = formatDate(d.mtime);
+      el.addEventListener('click', () => navigateTo(path ? path + '/' + d.name : d.name));
+      listEl.appendChild(el);
+    });
+
+    files.forEach(f => {
+      const ext = getExt(f.name);
+      const icon = ICONS[ext] || DEFAULT_ICON;
+      const iconCls = ICON_CLASS[ext] || '';
+      const el = document.createElement('div');
+      el.className = 'file';
+      el.innerHTML =
+        '<span class="file-icon ' + iconCls + '">' + icon + '</span>' +
+        '<span class="file-name"></span>' +
+        '<span class="file-date"></span>';
+      el.querySelector('.file-name').textContent = f.name;
+      el.querySelector('.file-date').textContent = formatDate(f.mtime);
+      el.addEventListener('click', () => {
+        const fullPath = path ? path + '/' + f.name : f.name;
+        openFile(fullPath);
+      });
+      listEl.appendChild(el);
+    });
+  }
+
+  backBtn.addEventListener('click', goBack);
+
+  // ── Drag and drop ──────────────────────────────
+  const dropOverlay = document.getElementById('drop-overlay');
+  let dragCounter = 0;
+
+  document.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    dragCounter++;
+    dropOverlay.classList.add('active');
+  });
+  document.addEventListener('dragleave', () => {
+    dragCounter--;
+    if (dragCounter <= 0) { dragCounter = 0; dropOverlay.classList.remove('active'); }
+  });
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    dropOverlay.classList.remove('active');
+    const here = currentPath();
+    for (const file of e.dataTransfer.files) {
+      const path = here ? here + '/' + file.name : file.name;
+      await fetch(`/api/files/files/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'PUT', body: file });
+    }
+    loadDir(here);
+  });
+
+  // ── New file dialog ────────────────────────────
+  const dialog = document.getElementById('new-dialog');
+  const filenameInput = document.getElementById('new-filename');
+
+  document.getElementById('new-btn').addEventListener('click', () => {
+    dialog.classList.add('active');
+    filenameInput.value = '';
+    filenameInput.focus();
+  });
+
+  document.getElementById('new-cancel').addEventListener('click', () => {
+    dialog.classList.remove('active');
+  });
+
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog) dialog.classList.remove('active');
+  });
+
+  document.querySelectorAll('.preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ext = btn.dataset.ext;
+      filenameInput.value = 'untitled' + ext;
+      filenameInput.setSelectionRange(0, 8);
+      filenameInput.focus();
+    });
+  });
+
+  filenameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createFile();
+    if (e.key === 'Escape') dialog.classList.remove('active');
+  });
+
+  document.getElementById('new-create').addEventListener('click', createFile);
+
+  async function createFile() {
+    const name = filenameInput.value.trim();
+    if (!name) return;
+
+    const ext = getExt(name);
+    const template = FILE_TEMPLATES[ext] || '';
+    const here = currentPath();
+    const path = here ? here + '/' + name : name;
+
+    await fetch(`/api/files/files/${path.split('/').map(encodeURIComponent).join('/')}`, {
+      method: 'PUT',
+      body: template,
+      headers: { 'Content-Type': 'text/plain' },
+    });
+
+    dialog.classList.remove('active');
+    openFile(path);
+  }
+
+  // ── Init ───────────────────────────────────────
+  navStack = [''];
+  loadDir('');
+})();
+</script>
+
+<script src="/core/capture.js"></script>
+<script>
+  Capture.init({
+    interval: 30000,
+    getContext: () => ({ workspace: 'files' }),
+  });
+</script>
+</body>
+</html>
