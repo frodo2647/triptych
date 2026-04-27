@@ -154,14 +154,17 @@
 <div class="header">
   <button class="header-btn" id="back-btn" title="Back" disabled>←</button>
   <span class="header-title" id="breadcrumb"></span>
+  <button class="header-btn" id="upload-btn" title="Upload files">↑ Upload</button>
   <button class="header-btn" id="new-btn">+ New</button>
 </div>
+
+<input type="file" id="upload-input" multiple style="display:none">
 
 <div class="file-list" id="file-list"></div>
 
 <div class="empty" id="empty-state" style="display:none">
   <div>No files yet</div>
-  <div class="empty-hint">Drop files here or click + New</div>
+  <div class="empty-hint">Drag files here, click ↑ Upload, or + New</div>
 </div>
 
 <div class="drop-overlay" id="drop-overlay">Drop files to upload</div>
@@ -466,6 +469,27 @@
 
   backBtn.addEventListener('click', goBack);
 
+  // ── Upload (shared helper for drag/drop and button) ─────
+  async function uploadFile(file, here) {
+    const path = here ? here + '/' + file.name : file.name;
+    const url = `/api/files/files/${path.split('/').map(encodeURIComponent).join('/')}`;
+    const res = await fetch(url, { method: 'PUT', body: file });
+    if (!res.ok) {
+      throw new Error(`Upload failed for ${file.name}: ${res.status} ${res.statusText}`);
+    }
+  }
+
+  async function uploadFiles(files) {
+    const here = currentPath();
+    const errors = [];
+    for (const file of files) {
+      try { await uploadFile(file, here); }
+      catch (err) { errors.push(err.message); }
+    }
+    loadDir(here);
+    if (errors.length) alert(errors.join('\n'));
+  }
+
   // ── Drag and drop ──────────────────────────────
   const dropOverlay = document.getElementById('drop-overlay');
   let dragCounter = 0;
@@ -484,12 +508,15 @@
     e.preventDefault();
     dragCounter = 0;
     dropOverlay.classList.remove('active');
-    const here = currentPath();
-    for (const file of e.dataTransfer.files) {
-      const path = here ? here + '/' + file.name : file.name;
-      await fetch(`/api/files/files/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'PUT', body: file });
-    }
-    loadDir(here);
+    await uploadFiles(e.dataTransfer.files);
+  });
+
+  // ── Upload button ──────────────────────────────
+  const uploadInput = document.getElementById('upload-input');
+  document.getElementById('upload-btn').addEventListener('click', () => uploadInput.click());
+  uploadInput.addEventListener('change', async () => {
+    if (uploadInput.files.length) await uploadFiles(uploadInput.files);
+    uploadInput.value = '';
   });
 
   // ── New file dialog ────────────────────────────
