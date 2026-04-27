@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Triptych</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.min.css">
+  <link rel="stylesheet" href="/core/theme.css">
+  <link rel="stylesheet" href="/core/shell.css">
+</head>
+<body>
+
+  <!-- ── Top Bar ─────────────────────────────────────────── -->
+  <nav id="topbar">
+    <div class="topbar-left">
+      <button id="back-btn" class="topbar-icon-btn" title="Back to files">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2L4 8l6 6"/></svg>
+      </button>
+    </div>
+    <div class="panel-labels">
+      <div class="panel-label" data-panel="workspace">
+        <button class="tab-btn active" data-panel="workspace" title="Toggle Workspace (Alt+1)">
+          <svg class="tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          <span class="tab-name">Workspace</span>
+        </button>
+        <button class="restore-btn" data-panel="workspace" title="Show Workspace (Alt+1)">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+        </button>
+      </div>
+      <div class="panel-label" data-panel="display">
+        <button class="tab-btn active" data-panel="display" title="Toggle Display (Alt+2)">
+          <svg class="tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+          <span class="tab-name">Display</span>
+        </button>
+        <button class="restore-btn" data-panel="display" title="Show Display (Alt+2)">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+        </button>
+      </div>
+      <div class="panel-label" data-panel="terminal">
+        <button class="tab-btn active" data-panel="terminal" title="Toggle Chat (Alt+3)">
+          <svg class="tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          <span class="tab-name">Chat</span>
+        </button>
+        <button class="restore-btn" data-panel="terminal" title="Show Chat (Alt+3)">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button id="shortcuts-btn" class="topbar-icon-btn" title="Keyboard shortcuts">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6a2 2 0 114 0c0 1.5-2 1.5-2 3"/><circle cx="8" cy="11.5" r="0.5" fill="currentColor"/></svg>
+      </button>
+      <button id="fullscreen-btn" class="topbar-icon-btn" title="Toggle fullscreen">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 6V3a1 1 0 011-1h3M10 2h3a1 1 0 011 1v3M14 10v3a1 1 0 01-1 1h-3M6 14H3a1 1 0 01-1-1v-3"/></svg>
+      </button>
+      <span id="ws-dot" class="dot dot-off" title="Connection status"></span>
+    </div>
+  </nav>
+
+  <!-- ── Panel Container ─────────────────────────────────── -->
+  <div id="triptych">
+
+    <section class="panel" data-panel="workspace" aria-label="Workspace">
+      <iframe class="panel-frame" title="Workspace content"></iframe>
+    </section>
+
+    <div class="seam" data-left="workspace" data-right="display" role="separator" aria-orientation="vertical"></div>
+
+    <section class="panel" data-panel="display" aria-label="Display">
+      <iframe class="panel-frame" title="Display content"></iframe>
+    </section>
+
+    <div class="seam" data-left="display" data-right="terminal" role="separator" aria-orientation="vertical"></div>
+    <div class="seam" data-left="workspace" data-right="terminal" role="separator" aria-orientation="vertical"></div>
+
+    <section class="panel" data-panel="terminal" aria-label="Chat">
+      <div id="terminal-tabs" class="terminal-tabs" hidden></div>
+      <div id="terminals" class="panel-frame"></div>
+    </section>
+
+  </div>
+
+  <!-- ── Shortcuts overlay ───────────────────────────────── -->
+  <div id="shortcuts-overlay" class="shortcuts-overlay" hidden>
+    <div class="shortcuts-card" role="dialog" aria-label="Keyboard shortcuts">
+      <div class="shortcuts-head">
+        <h2>Keyboard shortcuts</h2>
+        <button id="shortcuts-close" class="topbar-icon-btn" title="Close">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg>
+        </button>
+      </div>
+      <dl class="shortcuts-list">
+        <dt>Toggle Workspace</dt><dd><kbd>Alt</kbd><kbd>1</kbd></dd>
+        <dt>Toggle Display</dt><dd><kbd>Alt</kbd><kbd>2</kbd></dd>
+        <dt>Toggle Chat</dt><dd><kbd>Alt</kbd><kbd>3</kbd></dd>
+        <dt>Previous tab in panel</dt><dd><kbd>Alt</kbd><kbd>Q</kbd></dd>
+        <dt>Next tab in panel</dt><dd><kbd>Alt</kbd><kbd>W</kbd></dd>
+        <dt>Cycle focus back</dt><dd><kbd>Alt</kbd><kbd>A</kbd></dd>
+        <dt>Cycle focus forward</dt><dd><kbd>Alt</kbd><kbd>S</kbd></dd>
+        <dt>New Claude session</dt><dd><kbd>Alt</kbd><kbd>N</kbd></dd>
+        <dt>Close Claude session</dt><dd><kbd>Alt</kbd><kbd>X</kbd></dd>
+      </dl>
+    </div>
+  </div>
+
+  <!-- ── Scripts ─────────────────────────────────────────── -->
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.min.js"></script>
+  <script src="/core/shell.js"></script>
+
+</body>
+</html>
