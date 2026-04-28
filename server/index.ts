@@ -976,6 +976,29 @@ workspaceWatcher.on('all', () => {
   broadcastToAll({ type: 'workspaces-changed' });
 });
 
+// ── File Watcher (workspace files — for the file manager) ──────
+// Mirrors the output-watcher pattern above. Broadcasts a `files-reload`
+// signal so any open file-manager view re-fetches its directory listing.
+const filesDir = join(WORKSPACE, 'files');
+let filesReloadDebounce: ReturnType<typeof setTimeout> | null = null;
+
+const filesWatcher = chokidar.watch(filesDir, {
+  ignoreInitial: true,
+  awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 75 },
+  usePolling: true,
+  interval: 250,
+  depth: 8,
+});
+
+filesWatcher.on('all', (event, path) => {
+  log('debug', 'watch', `Files change: ${event} ${path}`);
+  if (filesReloadDebounce) clearTimeout(filesReloadDebounce);
+  filesReloadDebounce = setTimeout(() => {
+    log('info', 'watch', 'Broadcasting files-reload');
+    broadcastToAll({ type: 'files-reload' });
+  }, 200);
+});
+
 // ── Start ──────────────────────────────────────────────────────
 export function startServer(port = PORT) {
   return new Promise<{ server: typeof server; app: typeof app; wss: typeof wss; close: () => void }>((resolvePromise) => {

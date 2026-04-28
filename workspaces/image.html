@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Image</title>
+<link rel="stylesheet" href="/core/theme.css" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--void); color: var(--text-mid); font-family: var(--font-sans); }
+  .frame { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+  .topbar {
+    flex: 0 0 auto;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 0 var(--space-4);
+    border-bottom: 1px solid var(--hairline);
+    background: var(--chrome);
+    font-size: var(--text-xs);
+    letter-spacing: 0.04em;
+    color: var(--text-mid);
+    user-select: none;
+  }
+  .filename {
+    font-family: var(--font-mono);
+    color: var(--text-hi);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+  }
+  .meta {
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+  }
+  .mode-toggle {
+    background: transparent;
+    border: 1px solid var(--hairline);
+    color: var(--text-mid);
+    border-radius: var(--r-sm);
+    padding: 2px 8px;
+    font: inherit;
+    cursor: pointer;
+    transition: color var(--t-fast), border-color var(--t-fast);
+  }
+  .mode-toggle:hover { color: var(--accent); border-color: var(--accent); }
+
+  .canvas {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    background:
+      linear-gradient(45deg, var(--surface) 25%, transparent 25%),
+      linear-gradient(-45deg, var(--surface) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, var(--surface) 75%),
+      linear-gradient(-45deg, transparent 75%, var(--surface) 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+    background-color: var(--void);
+  }
+
+  /* Fit-to-pane (default) */
+  .canvas.fit img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    width: auto;
+    height: auto;
+  }
+  /* Actual size */
+  .canvas.actual img {
+    max-width: none;
+    max-height: none;
+    width: auto;
+    height: auto;
+  }
+
+  .empty, .error {
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    padding: var(--space-5);
+    text-align: center;
+  }
+  .error { color: var(--err); }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="topbar">
+    <div class="filename" id="filename">—</div>
+    <div class="meta" id="meta"></div>
+    <button class="mode-toggle" id="mode-toggle" title="Toggle fit / actual size">fit</button>
+  </div>
+  <div class="canvas fit" id="canvas">
+    <div class="empty">no image</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('canvas');
+  const filenameEl = document.getElementById('filename');
+  const metaEl = document.getElementById('meta');
+  const modeBtn = document.getElementById('mode-toggle');
+
+  const params = new URLSearchParams(location.search);
+  const fileParam = params.get('file');
+
+  function setMode(mode) {
+    canvas.classList.toggle('fit', mode === 'fit');
+    canvas.classList.toggle('actual', mode === 'actual');
+    modeBtn.textContent = mode;
+  }
+  modeBtn.addEventListener('click', () => {
+    setMode(canvas.classList.contains('fit') ? 'actual' : 'fit');
+  });
+
+  function load() {
+    if (!fileParam) {
+      canvas.innerHTML = '<div class="empty">no image — open one from the file list</div>';
+      filenameEl.textContent = '—';
+      metaEl.textContent = '';
+      return;
+    }
+    filenameEl.textContent = fileParam;
+
+    // Cache-bust on each load so files-reload swaps the bytes.
+    const url = `/api/files/files/${encodeURIComponent(fileParam)}?t=${Date.now()}`;
+    const img = new Image();
+    img.alt = fileParam;
+    img.onload = () => {
+      metaEl.textContent = `${img.naturalWidth}×${img.naturalHeight}`;
+      canvas.innerHTML = '';
+      canvas.appendChild(img);
+    };
+    img.onerror = () => {
+      canvas.innerHTML = '<div class="error">could not load image</div>';
+      metaEl.textContent = '';
+    };
+    img.src = url;
+  }
+
+  load();
+
+  // Re-load on filesystem changes broadcast by the shell.
+  window.addEventListener('message', (ev) => {
+    if (ev.data?.type === 'triptych-files-reload') load();
+  });
+})();
+</script>
+
+<script src="/core/capture.js"></script>
+<script>
+  Capture.init({
+    interval: 30000,
+    getContext: () => ({ workspace: 'image' }),
+  });
+</script>
+</body>
+</html>
