@@ -6,15 +6,82 @@ disable-model-invocation: true
 
 # First-Boot Setup
 
-Two stages:
-- **Stage 1 — One-time setup.** Runs when `CLAUDE.local.md` doesn't exist. Creates user config, recommends settings, gives a quick tour.
-- **Stage 2 — Per-session goal elicitation.** Runs at the start of any session if the user opts in. Asks what they want to do, seeds the research state, primes relevant skills, offers to do background prep while they review.
+Three branches:
+- **Stage 0 — Fast-path.** If the user's first message is a substantive task (they came in to *work*, not to be onboarded), spawn a setup subagent in the background and stay engaged with the task on the main thread.
+- **Stage 1 — Slow-path.** If the user came in cold (greeting, "what is this," vague intent), run the full guided setup ceremony.
+- **Stage 2 — Per-session goal elicitation.** Runs at the start of any session. Asks what they want to do, seeds the research state, primes relevant skills, offers to do background prep while they review.
 
-If this is a first boot (no `CLAUDE.local.md`), run Stage 1 followed by Stage 2. If `CLAUDE.local.md` exists and the user invokes `/first-boot` manually, skip straight to Stage 2.
+On first boot (no `CLAUDE.local.md`): pick Stage 0 or Stage 1 based on the rule below, then proceed to Stage 2. On subsequent sessions, only Stage 2 runs (or `/first-boot` invokes Stage 2 manually).
 
 ---
 
-## Stage 1 — One-time setup
+## Stage 0 — Fast-path (substantive first message)
+
+### When to use
+
+Use Stage 0 when **all** of these are true:
+- `CLAUDE.local.md` does not exist (this is genuinely a first boot).
+- The user's first message contains a substantive task — describes a problem, a domain, a goal, or asks for actual work. Heuristic: longer than ~20 words AND contains at least one domain noun (physics, math, ML, paper, derivation, prove, train, design, plan, etc.) OR a clear verb-of-action ("help me", "let's", "I want to", "build", "figure out").
+- The first message is *not* a greeting, "what is this", "how do I get started", or similar onboarding prompt.
+
+If any are false, fall through to Stage 1.
+
+### Behavior
+
+The user came here to work. Don't make them sit through ceremony. Two parallel tracks:
+
+**Track A — Main thread (you):** Engage with the user's task immediately. Ask any clarifying questions you'd ask normally. Do the work. **Do not** mention setup is happening unless the user asks.
+
+**Track B — Setup subagent (delegated):** Spawn a single Agent call to do all of Stage 1's setup work in the background. Use the `general-purpose` subagent type. The subagent prompt is below.
+
+When the subagent returns (typically 30-90s later), surface a one-line summary to the user, naturally — *"(set up Triptych for math + physics in the background; pulled `/sympy` and `/paper-lookup`. Carrying on.)"* — without breaking conversation flow. If the subagent failed or had to ask a question, fall back gracefully (mention it took a one-line note for `CLAUDE.local.md`, ask the user the minimum needed to unblock).
+
+### Subagent prompt (template)
+
+```
+Run Triptych first-boot setup non-interactively. The user came in with a working task — they're being helped by the main agent right now and you do all setup in the background.
+
+User's first message: <verbatim copy>
+Project root: <absolute path>
+Auto-memory user profile (if any): <one-line summary or "none">
+
+Tasks (do all of them, no clarifying questions back to the user):
+
+1. Infer 1-2 primary domains from the first message and any user-profile memory. Pick from {physics, math, ml, infrastructure-or-decision, writing, data, design, other}. If unclear, pick "other" — don't ask.
+
+2. Write CLAUDE.local.md to project root with:
+   - ## User Profile (Experience: inferred or "unspecified")
+   - ## Domains (the inferred 1-2)
+   - ## Preferences (leave a one-line placeholder)
+
+3. Invoke /skill-finder for each picked domain. **This is mandatory** — it's how Triptych grows into the user's specific sub-domain. Use the per-domain recommended-packages list in docs/internal/skill-sources.md as the trust gate. Install matches non-interactively. Skip ones that need explicit user consent — note them in the summary instead.
+
+4. Compile an MCP-server recommendation list for the inferred domains (sympy-mcp, desmos-mcp, manim-mcp for math/physics; context7 for CS/ML; arxiv-latex-mcp, firecrawl for research). DO NOT auto-install MCPs (requires user-side `claude mcp add`). Just list them in the summary so the main agent can mention them when there's a natural pause.
+
+5. If the user is on macOS or Linux, note in the summary that the sandbox config can be enabled by copying .claude/sandbox.example.json into .claude/settings.local.json. Don't do it automatically.
+
+Return a single-paragraph summary in this format:
+
+  Set up: domains=<x,y>; CLAUDE.local.md written; skills installed=<list or "none">; MCPs to suggest=<list>; notes=<anything that needed user attention>.
+
+Do not ask the user questions. Do not interrupt the main thread. If a step genuinely fails, report it in the notes field of the summary and continue with the rest.
+```
+
+### After the subagent returns
+
+- **Success path:** in your next natural turn, drop the one-line summary the subagent returned. Don't make a ceremony of it.
+- **Notes field has items:** mention the relevant ones (e.g. "by the way, you'd benefit from `claude mcp add sympy-mcp --scope user` when you have a sec") at a natural pause — not mid-derivation.
+- **Failure path:** treat as if Stage 1's CLAUDE.local.md write failed. Write a minimal CLAUDE.local.md yourself with `## Domains` set to "other" and continue. Don't let setup gaps block the user's task.
+
+### What Stage 0 does NOT do
+
+- The 7-step tour (panels, displays, five core commands). The user will discover these by using them; if they ask "what's this panel for," answer then.
+- Settings recommendations beyond writing CLAUDE.local.md. Don't open `~/.claude/settings.json` discussions during a working session.
+- Stage 2 goal elicitation. The user already stated the goal in their first message — that *is* the goal. Treat the working session as already started.
+
+---
+
+## Stage 1 — Slow-path (cold-start setup)
 
 ### 1. Greet and Explain
 
@@ -100,9 +167,18 @@ recommended-packages list in `docs/internal/skill-sources.md`. The
 trust gate is the recommendation list; user can decline individual
 fetches but the offer happens for each one.
 
-This is **not optional** — it's how Triptych grows into the user's
-specific sub-domain on first contact. If the user wants to skip,
-they say so once and you move on.
+**This step is mandatory and must actually fire.** The first trial
+run of `/first-boot` skipped this step entirely — that's the failure
+mode to avoid. Before moving to step 6, verify at least one
+`/skill-finder` invocation has happened (or the user has explicitly
+said "skip skills" — and even then, write that decision into
+`CLAUDE.local.md` so future sessions don't keep asking).
+
+If you find yourself about to advance to step 6 without having run
+`/skill-finder` at all, stop and run it now. Domain mentor skills
+(physics-in-triptych etc.) are necessary but not sufficient — the
+tactical skill packages in `docs/internal/skill-sources.md` are
+where Triptych adapts to the user's actual sub-domain.
 
 ### 6. Quick Tour
 
