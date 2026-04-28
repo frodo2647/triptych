@@ -27,3 +27,14 @@ html, body {
 body {
   overflow: hidden;
 }
+
+/* Hide scrollbars but keep scroll functionality */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}

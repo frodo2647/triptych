@@ -126,6 +126,17 @@
   --transition:      var(--t-norm) var(--ease);
 }
 
+/* ── Hide scrollbars but keep scrolling ──────────────────── */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 /* ── Light theme ─────────────────────────────────────────── */
 html[data-theme="light"] {
   --void:        #f5f1ea;
