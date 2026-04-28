@@ -198,6 +198,9 @@
     '.triptych': 'settings',
     '.doc': 'document', '.docx': 'document', '.rtf': 'document',
     '.htm': 'document', '.html': 'document',
+    '.png': 'image', '.jpg': 'image', '.jpeg': 'image',
+    '.gif': 'image', '.webp': 'image', '.svg': 'image', '.bmp': 'image',
+    '.avif': 'image', '.ico': 'image',
   };
 
   const FILE_TEMPLATES = {
@@ -571,6 +574,17 @@
     dialog.classList.remove('active');
     openFile(path);
   }
+
+  // ── Auto-reload on filesystem changes ──────────
+  // The shell forwards a 'triptych-files-reload' postMessage when the
+  // server's chokidar watcher on workspace/files/ fires. Re-fetch the
+  // current directory; debounced so a burst of writes coalesces.
+  let filesReloadDebounce = null;
+  window.addEventListener('message', (ev) => {
+    if (ev.data?.type !== 'triptych-files-reload') return;
+    if (filesReloadDebounce) clearTimeout(filesReloadDebounce);
+    filesReloadDebounce = setTimeout(() => loadDir(currentPath()), 120);
+  });
 
   // ── Init ───────────────────────────────────────
   navStack = [''];

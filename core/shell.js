@@ -531,6 +531,9 @@
         case 'reload':
           reloadDisplay();
           break;
+        case 'files-reload':
+          reloadFilesView();
+          break;
         case 'switch-workspace':
           if (msg.workspace) openWorkspaceFile(msg.workspace, msg.file);
           break;
@@ -656,6 +659,24 @@
     });
     t.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && isTriptychShortcut(e)) return false;
+      // Native paste: Ctrl+V (Win/Linux), Cmd+V (mac), Shift+Insert (Win).
+      // xterm.js by default only honors Ctrl+Shift+V, which most users
+      // don't know — so we intercept the OS-native combo, read the
+      // clipboard ourselves, and feed bytes through the same path xterm
+      // would use for a paste event.
+      if (e.type === 'keydown') {
+        const isCtrlV = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === 'KeyV';
+        const isShiftInsert = e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'Insert';
+        if (isCtrlV || isShiftInsert) {
+          e.preventDefault();
+          if (navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then((text) => {
+              if (text) wsSend({ type: 'terminal-input', sessionId, data: text });
+            }).catch(() => {});
+          }
+          return false;
+        }
+      }
       return true;
     });
     const fit = new FitAddon.FitAddon();
@@ -723,6 +744,18 @@
     if (iframe?.contentWindow) {
       iframe.contentWindow.postMessage({ type: 'triptych-display-reload' }, '*');
     }
+  }
+
+  /* ── Files reload (chokidar broadcast on workspace/files/) ──
+     Forward to every iframe in panel-a so the file manager
+     (and any future workspace that cares) can re-fetch listings
+     without a full page reload. */
+  function reloadFilesView() {
+    panels[0].querySelectorAll('iframe').forEach(f => {
+      if (f?.contentWindow) {
+        f.contentWindow.postMessage({ type: 'triptych-files-reload' }, '*');
+      }
+    });
   }
 
   /* ── Session save / restore ──────────────────────────── */
@@ -855,7 +888,13 @@
       if (open.length) { open.forEach(m => { m.classList.remove('open'); m.classList.remove('shown'); }); return; }
     }
     if (cmdBar.classList.contains('open')) return;
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    // Only bail for plain typing in form fields. With Alt/Ctrl/Meta held
+    // the user isn't typing — and importantly, xterm uses a hidden
+    // <textarea> to capture input, so this guard otherwise eats every
+    // shortcut while focus is on the terminal (which is most of the time).
+    const inForm = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+    const noMods = !e.altKey && !e.ctrlKey && !e.metaKey;
+    if (inForm && noMods) return;
     if (!isTriptychShortcut(e)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
