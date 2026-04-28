@@ -62,8 +62,8 @@ Task(
 Read the verdict:
 
 - **"analysis is complete"** → log to redteam pass with this context, proceed.
-- **"minor gaps only"** → note the gaps, proceed to redteam.
-- **"important gaps"** or **"load-bearing gaps"** → surface to user before redteam: *"whats-missing flagged: `<gap>`. Want to address this before red-teaming, or run both passes and triage at the end?"*
+- **"minor gaps only"** or **"important gaps"** → note the gaps, proceed to redteam. Triage all findings together at the end (Step 6) — don't pause mid-`/check` to ask the user how to handle each gap class. Iteration cadence stays uninterrupted.
+- **"load-bearing"** or **"blocking gaps"** (where redteam can't sensibly run until the gap is addressed — e.g. the artifact has a hole that makes challenging it pointless) → only here, pause and surface to user: *"whats-missing flagged a blocking gap: `<gap>`. Redteam can't meaningfully challenge until this is addressed — fix first, or proceed anyway?"*
 
 ## Step 4: Run redteam (if in mode)
 

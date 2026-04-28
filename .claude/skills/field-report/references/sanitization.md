@@ -42,6 +42,27 @@ Replace with `?<redacted-query>`.
 
 Replace `[\w.+-]+@[\w-]+\.[\w.-]+` matches with `<redacted-email>`.
 
+## 5b. User display-name strip
+
+The session prompt frequently puts the user's first name in the agent's mouth — drafted reports often quote "Quinn said X" or "the user (Alice) wanted Y" without the agent realizing it. The other rules don't catch this because a name isn't a secret pattern; it's contextual PII.
+
+Source the user's name from these locations (collect all unique non-trivial tokens, dedupe):
+
+| Source | Field |
+|---|---|
+| `git config user.name` | full string; also split on whitespace and treat each token as a candidate |
+| `~/.claude/settings.json` | `user.name` if present |
+| `MEMORY.md` user-profile entries | frontmatter `name:` field; first-line `Name:` patterns |
+| `$USER` / `$USERNAME` env vars | only if longer than 2 chars and not a generic handle (`admin`, `user`, `owner`, `root`, `desktop-*`, etc.) |
+
+For each collected token of length ≥ 3, replace whole-word case-insensitive matches in the draft with `<USER>`. Skip tokens that are common English words (`John`, `May`, `Will` etc. — if the token also appears in `/usr/share/dict/words` or equivalent, require a 4+ character match and prefer last-name tokens).
+
+After replacements, run a final occurrence-count of the same tokens. If the count is non-zero, the user-name pass missed something — surface to the user before submit:
+
+> *Sanitizer flagged: name "<token>" still appears N time(s) after scrub. Open draft to review (yes/no)?*
+
+This is the only sanitization step that asks the user a question — it's worth the friction because a slipped-through name is the highest-stakes leak the field-report path can produce.
+
 ## 6. File-content truncation
 
 Any file content over 200 lines: keep the first 50 and last 50, and

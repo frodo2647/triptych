@@ -53,6 +53,12 @@ in order (full list in `references/sanitization.md`):
 - Truncate file contents > 200 lines → `[truncated, N lines]`
 - Strip URLs containing `?key=`, `?token=`, or `?api_key=`
 - Strip email regex `[\w.+-]+@[\w-]+\.[\w.-]+`
+- **Strip user display name → `<USER>`.** Read names from these sources and replace each occurrence (whole-word, case-insensitive) in the draft:
+  - `git config user.name` (split on whitespace; replace first AND full forms)
+  - First-name and full-name fields in any `MEMORY.md` user-profile entries (`memory/user_*.md` frontmatter `name:` field, or first-line "Name: ..." patterns)
+  - The OS username from `$USER` / `$USERNAME` (skip if it looks like a generic handle like "admin", "user", "owner")
+  - Skip names ≤ 2 characters (false-positive risk)
+- After all replacements, count occurrences of any matched name still in the draft. If non-zero, the scrub failed — surface to the user before submit: *"Name appeared N times after scrub — review draft? (yes/no)"*
 
 ### 5. Draft a markdown issue body
 
