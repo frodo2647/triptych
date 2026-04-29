@@ -1017,6 +1017,19 @@ export function startServer(port = PORT) {
       console.log(`  Workspace: ${WORKSPACE}`);
       console.log(`  Workspaces: ${WORKSPACES_DIR}`);
 
+      // First-boot detection — log a marker (and create the file) the very
+      // first time the server starts in this project. The agent's first-boot
+      // skill checks for this flag to decide whether to give the user a tour.
+      const firstRunMarker = join(WORKSPACE, '.first-run-completed');
+      if (!existsSync(firstRunMarker)) {
+        try {
+          writeFileSync(firstRunMarker, new Date().toISOString() + '\n');
+          console.log('  [FIRST-BOOT] First server start detected — agent will offer a brief tour on first turn.');
+        } catch (err) {
+          log('warn', 'first-boot', 'Could not write first-run marker:', err);
+        }
+      }
+
       resolvePromise({
         server,
         app,
