@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Three.js Editor</title>
+  <link rel="stylesheet" href="/core/theme.css">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--void); color: var(--text-hi); font-family: var(--font); font-size: 12px; }
+    #app { display: flex; flex-direction: column; height: 100%; }
+    #bar {
+      flex: 0 0 auto;
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface);
+      font-size: 11px; color: var(--text-mid);
+    }
+    #bar .title { color: var(--text-hi); font-weight: 500; }
+    #bar .file-name { color: var(--accent); font-family: var(--font-mono, monospace); font-size: 11px; }
+    #bar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
+    #bar .dot.ok { background: var(--accent); }
+    #bar .save-btn {
+      background: none; border: 1px solid var(--border); color: var(--text-2);
+      font-family: var(--font); font-size: 10px;
+      padding: 3px 10px; border-radius: 3px; cursor: pointer;
+    }
+    #bar .save-btn:hover { color: var(--text); border-color: var(--text-3); }
+    #bar .note { margin-left: auto; color: var(--text-dim); }
+    #bar a { color: var(--text-mid); text-decoration: none; border-bottom: 1px dotted var(--text-dim); }
+    #bar a:hover { color: var(--text-hi); }
+    #frame { flex: 1; width: 100%; border: none; background: #1a1a1a; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="bar">
+      <span class="dot" id="status-dot"></span>
+      <span class="title">Three.js Editor</span>
+      <span class="file-name" id="file-name"></span>
+      <button class="save-btn" id="save-btn" style="display:none">Export GLB</button>
+      <span class="note">hosted by <a href="https://threejs.org/editor/" target="_blank" rel="noopener">threejs.org</a></span>
+    </div>
+    <iframe id="frame" src="https://threejs.org/editor/" allow="fullscreen"></iframe>
+  </div>
+
+  <script src="/core/capture.js"></script>
+  <script>
+    // The Three.js editor (threejs.org/editor) doesn't expose a clean
+    // postMessage API for loading/saving files cross-origin. So this
+    // workspace gives the user manual instructions: drag a .gltf/.glb in,
+    // edit, then File → Export GLB → save back.
+    //
+    // We surface the file path in the toolbar and a one-click reminder
+    // button so the workflow is obvious. Future work could host a self-hosted
+    // editor build with a postMessage bridge.
+    (function () {
+      var frame = document.getElementById('frame');
+      var statusDot = document.getElementById('status-dot');
+      var saveBtn = document.getElementById('save-btn');
+      var fileNameEl = document.getElementById('file-name');
+
+      var params = new URLSearchParams(location.search);
+      var filePath = params.get('file');
+
+      frame.addEventListener('load', function () {
+        statusDot.classList.add('ok');
+      });
+
+      if (filePath) {
+        fileNameEl.textContent = filePath;
+        saveBtn.style.display = 'inline-block';
+        saveBtn.addEventListener('click', function () {
+          alert(
+            'To save: in the editor, choose File → Export GLB. ' +
+            'When the download completes, drop it back into the file ' +
+            'manager to overwrite "' + filePath + '" (or upload it as a ' +
+            'new file).'
+          );
+        });
+        // Inform the user how to load
+        setTimeout(function () {
+          if (statusDot.classList.contains('ok')) {
+            // gentle hint the first time
+            console.log('[threejs-editor] To load ' + filePath +
+                        ': drag the file from the file manager onto this iframe.');
+          }
+        }, 1500);
+      }
+
+      if (typeof Capture !== 'undefined') {
+        Capture.init({
+          interval: 30000,
+          getContext: function () {
+            return { workspace: 'threejs-editor', file: filePath || null };
+          },
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
