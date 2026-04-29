@@ -281,15 +281,17 @@ def show_scene_preview(scene_path, *, title='', filename='index.html',
             clean = clean[len('workspace/files/'):]
         url = '/api/files/files/' + clean
 
-    caption = title or os.path.basename(p)
+    # render_page wraps the body in .tp-body (which has padding) and emits
+    # a .tp-title row above it. Override both so model-viewer can fill the
+    # whole viewport, and let .tp-title carry the caption — no duplicate
+    # info overlay.
     body = (
         '<style>'
         'html,body{margin:0;height:100%;background:' + BG_VOID + ';overflow:hidden;}'
-        'model-viewer{width:100%;height:100vh;background:' + BG_VOID + ';--poster-color:transparent;}'
-        '#info{position:absolute;top:12px;left:16px;color:' + TEXT_SECONDARY + ';'
-        'font-size:11px;pointer-events:none;z-index:10;font-family:system-ui,sans-serif;}'
+        '.tp-title{padding:8px 12px 6px;border-bottom:1px solid ' + BG_VOID + ';}'
+        '.tp-body{padding:0;height:calc(100vh - 32px);}'
+        'model-viewer{width:100%;height:100%;background:' + BG_VOID + ';--poster-color:transparent;}'
         '</style>'
-        '<div id="info">' + json.dumps(caption)[1:-1] + '</div>'
         '<model-viewer'
         f' src="{url}"'
         ' camera-controls'
@@ -305,4 +307,4 @@ def show_scene_preview(scene_path, *, title='', filename='index.html',
         '</script>'
     )
     return write_page(body, head=head, name=name, display_id=display_id,
-                      filename=filename, title=title or 'Scene preview')
+                      filename=filename, title=title or os.path.basename(p))
