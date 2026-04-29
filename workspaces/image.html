@@ -64,6 +64,13 @@
     background-position: 0 0, 0 10px, 10px -10px, -10px 0;
     background-color: var(--void);
   }
+  /* SVGs are usually authored as black-on-white (schematics, diagrams,
+     plots). Render them on a light surface so dark strokes stay readable.
+     PNG/JPG keep the checkerboard so transparency is visible. */
+  .canvas.svg {
+    background: #f5f5f5;
+    padding: 16px;
+  }
 
   /* Fit-to-pane (default) */
   .canvas.fit img {
@@ -122,7 +129,49 @@
     setMode(canvas.classList.contains('fit') ? 'actual' : 'fit');
   });
 
+  function isSvg(name) { return /\.svg$/i.test(name); }
+
+  // SVGs without `xmlns="http://www.w3.org/2000/svg"` get rejected by <img>
+  // because browsers parse them as strict XML. Fall back to inlining the
+  // SVG as DOM (which handles missing xmlns) and strip any <script> tags
+  // for safety since the bytes execute in the workspace iframe origin.
+  function inlineSvg(text) {
+    canvas.innerHTML = '';
+    canvas.classList.add('svg');
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%;';
+    wrap.innerHTML = text;
+    const svg = wrap.querySelector('svg');
+    if (!svg) {
+      canvas.innerHTML = '<div class="error">file is not a valid SVG</div>';
+      canvas.classList.remove('svg');
+      return;
+    }
+    // Drop <script> elements — same precaution as embedding any untrusted SVG.
+    svg.querySelectorAll('script').forEach(s => s.remove());
+    // Default sizing constraints for fit mode
+    svg.style.maxWidth = '100%';
+    svg.style.maxHeight = '100%';
+    canvas.appendChild(wrap);
+    const w = svg.getAttribute('width') || svg.viewBox?.baseVal?.width || '?';
+    const h = svg.getAttribute('height') || svg.viewBox?.baseVal?.height || '?';
+    metaEl.textContent = `${w}×${h} (svg)`;
+  }
+
+  async function loadSvg(url) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      inlineSvg(text);
+    } catch (err) {
+      canvas.innerHTML = `<div class="error">could not load image: ${err.message}</div>`;
+      metaEl.textContent = '';
+    }
+  }
+
   function load() {
+    canvas.classList.remove('svg');
     if (!fileParam) {
       canvas.innerHTML = '<div class="empty">no image — open one from the file list</div>';
       filenameEl.textContent = '—';
@@ -133,6 +182,11 @@
 
     // Cache-bust on each load so files-reload swaps the bytes.
     const url = `/api/files/files/${encodeURIComponent(fileParam)}?t=${Date.now()}`;
+
+    // SVGs go through the inline-as-DOM path (handles SVGs without xmlns,
+    // which <img> would reject). Everything else uses <img>.
+    if (isSvg(fileParam)) { loadSvg(url); return; }
+
     const img = new Image();
     img.alt = fileParam;
     img.onload = () => {
@@ -141,8 +195,9 @@
       canvas.appendChild(img);
     };
     img.onerror = () => {
-      canvas.innerHTML = '<div class="error">could not load image</div>';
-      metaEl.textContent = '';
+      // Last-ditch fallback: maybe the server returned an SVG-ish body
+      // for a non-.svg URL — try the inline path before giving up.
+      loadSvg(url);
     };
     img.src = url;
   }
