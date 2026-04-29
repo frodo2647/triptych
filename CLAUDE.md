@@ -8,6 +8,12 @@ Triptych supports research, study, writing, data analysis, and design. Verificat
 
 The filesystem is the communication channel. You read and write files. The framework handles the rest. Triptych is Express + WebSocket on port 3000, with chokidar watching `workspace/output/` for display auto-reload.
 
+## Editable Workspace vs Read-Only Display (invariant)
+
+The workspace panel is **editable** — files the human owns and modifies. The display panel is **read-only** — what the agent renders to communicate. Don't confuse them. When integrating a third-party tool that has both an editor and a viewer (CircuitJS, Three.js editor, notebook UIs), the editor goes in `workspaces/`, the viewer in `displays/`. Embedding an editable iframe in the display tab is a sign you got the panels backwards.
+
+Concrete pairs already in tree: `workspaces/circuitjs.html` (Falstad editor) ↔ `displays/circuitjs.py:show_circuit_schematic` (read-only schematic preview); `workspaces/threejs-editor.html` (Three.js editor) ↔ `displays/threejs.py:show_scene_preview` (read-only glTF/GLB preview). Follow that pattern for new integrations.
+
 ## Show Your Work
 
 Write to `workspace/output/`. The display panel auto-reloads.

@@ -252,3 +252,75 @@ def show_parametric(curve_js, t_range=(0, 6.283), steps=200, color=0x6e73ff,
   setInfo({json.dumps(title)} || 'Parametric curve');
 '''
     return show_threejs(js, filename=filename, name=name, display_id=display_id)
+
+
+def show_scene_preview(scene_path, *, title='', filename='index.html',
+                       name=None, display_id=None):
+    """Show a read-only preview of a glTF/GLB scene.
+
+    Loads the scene with GLTFLoader, fits it in view, and gives the user
+    OrbitControls to look around — but no editing. Use this to render a
+    scene the user (or the agent) authored in the workspace editor without
+    re-launching the editor itself.
+
+    Args:
+        scene_path: path to a .gltf or .glb file under workspace/files/
+        title: optional caption shown in the corner overlay
+        filename: output filename for unnamed displays
+        name / display_id: named-tab stem
+    """
+    import os.path
+    p = str(scene_path)
+    # Normalize to a /api/files/ URL so the iframe can fetch it
+    if p.startswith('http://') or p.startswith('https://'):
+        url = p
+    else:
+        # Strip any leading workspace/files/ prefix; the API mounts at that root
+        clean = p.replace('\\', '/').lstrip('./')
+        if clean.startswith('workspace/files/'):
+            clean = clean[len('workspace/files/'):]
+        url = '/api/files/files/' + clean
+
+    # NOTE: the bootstrap copies a lexical `_target` into OrbitControls *before*
+    # the async GLTF load resolves, so we can't seed orbit pivot from inside
+    # the load callback that way. Instead, schedule a post-load update against
+    # the controls instance (which the bootstrap stores on `window` under no
+    # name — but `controls` is in scope until animate() captures it). The
+    # workaround is to set `controls.target` directly via a deferred lookup
+    # through the renderer's domElement → its OrbitControls instance, which
+    # we expose by stashing it on `window.__controls` in the bootstrap.
+    # Simplest approach: use camera.lookAt for the initial frame, and tell the
+    # controls to refresh by dispatching the change event after we adjust.
+    js = f'''
+  const loaderUrl = "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js";
+  const url = {json.dumps(url)};
+
+  setInfo({json.dumps(title or os.path.basename(p))});
+
+  // Stash controls so we can update target after async load completes.
+  // OrbitControls is created later in the bootstrap; defer the patch.
+  setTimeout(() => {{ window.__triptychControls = controls; }}, 0);
+
+  import(loaderUrl).then(mod => {{
+    const loader = new mod.GLTFLoader();
+    loader.load(url, gltf => {{
+      const root = gltf.scene || gltf.scenes[0];
+      scene.add(root);
+      const box = new THREE.Box3().setFromObject(root);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z) || 1;
+      const dist = maxDim * 2.2;
+      camera.position.set(center.x + dist, center.y + dist * 0.7, center.z + dist);
+      camera.lookAt(center);
+      const c = window.__triptychControls;
+      if (c) {{ c.target.copy(center); c.update(); }}
+    }}, undefined, err => {{
+      setInfo("Failed to load: " + err.message);
+      console.error("[scene-preview]", err);
+    }});
+  }}).catch(err => {{
+    setInfo("Failed to load GLTFLoader: " + err.message);
+  }});
+'''
+    return show_threejs(js, filename=filename, name=name, display_id=display_id, title=title)
