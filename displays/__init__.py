@@ -19,7 +19,6 @@ from .questions import show_questions, read_answers, wait_for_answers
 from .derivation import show_derivation
 from .autoresearch import show_autoresearch
 from .circuitjs import show_circuitjs_waveform, show_circuitjs_bode, show_circuit_schematic
-from .watch import show_watch
 from ._base import (
     clear, clear_display, cleanup_displays,
     focus_display, active_display,

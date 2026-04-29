@@ -218,6 +218,12 @@ Read what the human is working on:
 
 Watch any desktop window in real-time. Claude reads screenshots natively (multimodal) — no OCR needed.
 
+### How to open it
+
+Click the **eye icon** in the workspace top bar (next to the `+`). It opens the Watch picker as a workspace tab. Pick a window from the list, hit Start, and screenshots refresh into `workspace/snapshots/watch/latest.png` every few seconds.
+
+The Watch tab is a singleton — clicking the eye again just re-activates the existing tab. Closing the tab does **not** stop watching; use the Stop button inside the picker to do that.
+
 ### API Endpoints
 
 | Endpoint | Method | Description |

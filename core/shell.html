@@ -337,6 +337,20 @@
   .tab-add:hover { color: var(--accent); }
   .tab-add[hidden] { display: none; }
 
+  .tab-action {
+    width: 26px; height: 22px;
+    display: grid; place-items: center;
+    color: var(--text-faint);
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    flex-shrink: 0;
+    margin-left: 2px;
+    border-radius: 3px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .tab-action:hover { color: var(--accent); background: var(--surface-2); }
+
   /* ── Panel content ────────────────────────────────────── */
   .panel-content {
     flex: 1;
@@ -744,6 +758,9 @@
         <div class="tabstrip" data-tabstrip="workspace">
           <button class="tab-add" title="Open file manager (Alt+N)" data-add="workspace">
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+          </button>
+          <button class="tab-action tab-watch" title="Watch a desktop window — agent reads the live screenshots" data-action="watch">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.2"/></svg>
           </button>
         </div>
       </div>
