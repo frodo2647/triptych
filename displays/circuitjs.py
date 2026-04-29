@@ -7,34 +7,40 @@ agent can write to the display panel without giving the user an editor.
 Three entry points:
 
   show_circuit_schematic(source, ...)
-      Render a schematic for *viewing* (not editing). `source` may be:
+      Render a *static* schematic for viewing. `source` may be:
         - an SVG string starting with "<svg" or "<?xml",
-        - a path to a .png/.svg/.jpg image,
-        - a path to a .circuit JSON envelope (uses share_url if present),
-        - a Falstad share URL (https://...?ctz=...),
-        - a raw Falstad netlist (multi-line text starting with "$").
+        - a path to a .png / .svg / .jpg image,
+        - a path to a .circuit JSON envelope (renders the sibling
+          `<stem>.svg` / `<stem>.png` if one exists; otherwise shows a
+          short hint to export an image from the workspace).
+
+      The display intentionally does NOT embed the Falstad iframe.
+      Falstad is the editor; the editor lives in the workspace tab.
+      For schematics drawn from code, the recommended path is the
+      `schemdraw` library (pip install schemdraw):
+
+          import schemdraw
+          import schemdraw.elements as elm
+          d = schemdraw.Drawing()
+          d += elm.SourceV().label('5V')
+          d += elm.Resistor().right().label('1kΩ')
+          d += elm.Capacitor().down().label('100nF')
+          d += elm.Line().left()
+          d.save('workspace/files/rc-lowpass.svg')
+          show_circuit_schematic('workspace/files/rc-lowpass.svg',
+                                 title='RC low-pass')
 
   show_circuitjs_waveform(path, ...)
       Plotly time-domain plot from a `{t, v}` or `{t, probes}` JSON.
 
   show_circuitjs_bode(freqs, magnitudes, phases, ...)
       Plotly Bode plot from arrays.
-
-Typical flow:
-  1. User designs a circuit in the workspace iframe (or pastes a share URL
-     into a `.circuit` file).
-  2. Agent calls `show_circuit_schematic(".circuit file path")` to *show*
-     the same circuit in the display, read-only.
-  3. For analysis: agent computes Bode/transient and calls the Plotly entry
-     points; or exports waveform JSON from Falstad and uses
-     `show_circuitjs_waveform`.
 """
 
 from __future__ import annotations
 
 import html as html_mod
 import json
-import urllib.parse
 from pathlib import Path
 from typing import Optional
 
@@ -42,30 +48,26 @@ from ._base import (BG_VOID, BG_SURFACE, TEXT_PRIMARY, FONT,
                     atomic_write_text, resolve_display_path)
 
 
-_FALSTAD_BASE = "https://www.falstad.com/circuit/circuitjs.html"
-
-
-def _falstad_netlist_url(netlist: str) -> str:
-    """Build a Falstad URL with the netlist URL-encoded (NOT html-escaped)."""
-    return _FALSTAD_BASE + "?cct=" + urllib.parse.quote(netlist, safe='')
-
-
 def show_circuit_schematic(source, *,
                            title: Optional[str] = None,
                            name: Optional[str] = None,
                            display_id: Optional[str] = None) -> None:
-    """Render a circuit schematic in the display, read-only.
+    """Render a static circuit schematic in the display, read-only.
 
     Args:
         source: one of:
             - SVG string (starts with "<svg" or "<?xml")
-            - Path to a .png/.jpg/.svg image
-            - Path to a .circuit JSON envelope (uses share_url field)
-            - Falstad share URL (https://...?ctz=... or ?cct=...)
-            - Raw Falstad netlist (text containing newlines and component
-              lines, used as ?cct= payload)
+            - Path to a .png / .jpg / .svg image
+            - Path to a .circuit JSON envelope. Renders a sibling
+              `<stem>.svg` or `<stem>.png` if one exists; otherwise
+              shows a hint pointing at the workspace.
         title: optional caption shown above the schematic
         name / display_id: named-tab stem
+
+    The display does NOT load the Falstad iframe. Use the workspace
+    `circuitjs` tab to edit; export an image from there
+    (File → Export Image → Save to workspace/files/) and pass the
+    image path here.
     """
     body = _render_schematic_body(source)
     cap = html_mod.escape(title) if title else ""
@@ -90,11 +92,22 @@ def _render_schematic_body(source) -> str:
         s = source.strip()
         if s.startswith("<svg") or s.startswith("<?xml"):
             return f'<div class="schematic svg-wrap">{s}</div>'
+        # Otherwise treat as a file path. Reject URLs and raw netlists —
+        # those belong in the workspace, not the display.
         if s.startswith("http://") or s.startswith("https://"):
-            return _iframe_readonly(s)
+            raise ValueError(
+                "show_circuit_schematic does not embed live Falstad URLs. "
+                "The display is read-only; open the URL in the circuitjs "
+                "workspace tab to edit, or export an image and pass the "
+                "image path here."
+            )
         if "\n" in s and ("$" in s or "w " in s or "r " in s):
-            return _iframe_readonly(_falstad_netlist_url(s))
-        # Otherwise treat as a file path
+            raise ValueError(
+                "show_circuit_schematic does not render raw Falstad netlists. "
+                "The display is static — use the circuitjs workspace tab to "
+                "edit the netlist, or render the schematic to SVG/PNG via "
+                "schemdraw and pass the path here."
+            )
         return _render_path_source(Path(s))
     if isinstance(source, Path):
         return _render_path_source(source)
@@ -106,37 +119,39 @@ def _render_path_source(p: Path) -> str:
         raise FileNotFoundError(f"schematic source not found: {p}")
     suf = p.suffix.lower()
     if suf in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
-        rel = "/api/files/" + p.as_posix().lstrip("./")
-        return f'<div class="schematic"><img src="{html_mod.escape(rel)}" alt="circuit"></div>'
+        return _img_tag(p)
     if suf == ".svg":
         return f'<div class="schematic svg-wrap">{p.read_text(encoding="utf-8")}</div>'
     if suf == ".circuit":
+        # Validate JSON shape but don't use share_url / netlist fields here —
+        # those drive the *workspace* editor, not the static display.
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            json.loads(p.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             raise ValueError(f".circuit is not valid JSON: {p}") from e
-        share = (data.get("share_url") or "").strip()
-        netlist = (data.get("netlist") or "").strip()
-        if share:
-            return _iframe_readonly(share)
-        if netlist:
-            return _iframe_readonly(_falstad_netlist_url(netlist))
-        return ('<div class="schematic empty">'
-                'Empty .circuit file — paste a Falstad share URL into the workspace and Save.'
-                '</div>')
+        # Look for a sibling rendered image: foo.circuit → foo.svg / foo.png
+        for ext in (".svg", ".png", ".jpg", ".jpeg"):
+            sibling = p.with_suffix(ext)
+            if sibling.exists():
+                if ext == ".svg":
+                    return f'<div class="schematic svg-wrap">{sibling.read_text(encoding="utf-8")}</div>'
+                return _img_tag(sibling)
+        return (
+            '<div class="schematic empty">'
+            f'<div><strong>{html_mod.escape(p.name)}</strong> has no rendered schematic.</div>'
+            '<div class="hint">'
+            'Open it in the <code>circuitjs</code> workspace tab, then '
+            'File → Export Image and save the PNG/SVG next to the '
+            '<code>.circuit</code> file (same stem). The display will pick it up.'
+            '</div>'
+            '</div>'
+        )
     raise ValueError(f"unsupported schematic file type: {suf}")
 
 
-def _iframe_readonly(url: str) -> str:
-    safe = html_mod.escape(url, quote=True)
-    # pointer-events:none on the overlay locks interaction; the iframe still
-    # renders the running simulation, the overlay just captures clicks.
-    return (
-        f'<div class="schematic iframe-wrap">'
-        f'  <iframe src="{safe}"></iframe>'
-        f'  <div class="readonly-veil" title="Read-only — edit in the workspace tab"></div>'
-        f'</div>'
-    )
+def _img_tag(p: Path) -> str:
+    rel = "/api/files/" + p.as_posix().lstrip("./")
+    return f'<div class="schematic"><img src="{html_mod.escape(rel)}" alt="circuit"></div>'
 
 
 _SCHEMATIC_TEMPLATE = """<!DOCTYPE html>
@@ -151,15 +166,10 @@ _SCHEMATIC_TEMPLATE = """<!DOCTYPE html>
     #wrap {{ display: flex; flex-direction: column; height: 100%; }}
     .caption {{ padding: 8px 12px; font-size: 11px; color: var(--text-mid); border-bottom: 1px solid var(--border); }}
     .schematic {{ flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; position: relative; background: #fff; }}
-    .schematic.empty {{ background: var(--void); color: var(--text-dim); padding: 24px; text-align: center; font-size: 12px; }}
+    .schematic.empty {{ background: var(--void); color: var(--text-mid); padding: 32px; text-align: center; font-size: 13px; flex-direction: column; gap: 12px; }}
+    .schematic.empty .hint {{ color: var(--text-dim); font-size: 11px; max-width: 360px; line-height: 1.5; }}
+    .schematic.empty code {{ font-family: var(--font-mono, monospace); color: var(--accent); font-size: 11px; }}
     .schematic.svg-wrap svg {{ max-width: 100%; max-height: 100%; }}
-    .schematic.iframe-wrap {{ background: #fff; }}
-    .schematic.iframe-wrap iframe {{ width: 100%; height: 100%; border: none; }}
-    .schematic .readonly-veil {{
-      position: absolute; inset: 0;
-      cursor: not-allowed;
-      background: transparent;
-    }}
     .schematic img {{ max-width: 100%; max-height: 100%; }}
   </style>
 </head>
