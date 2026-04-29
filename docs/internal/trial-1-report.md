@@ -38,11 +38,11 @@ Where friction appeared was at the surfaces — display tab flicker, stale outpu
 
 ## 1. What Trial 1 Actually Was
 
-Quinn cloned Triptych to `C:/Users/aquin/mnist/` (same initial commit as the base system) and ran an ML study: train a from-scratch CuPy MLP on MNIST, saturate accuracy, then transfer the recipe to EMNIST-Balanced. Full trial spec in `workspace/files/emnist/PLAN.md` (source plan uses coarser numbering up to Stage 8; the agent's own plan in `workspace/research/state.md` breaks this into 7 items).
+Quinn cloned Triptych to `~/mnist/` (same initial commit as the base system) and ran an ML study: train a from-scratch CuPy MLP on MNIST, saturate accuracy, then transfer the recipe to EMNIST-Balanced. Full trial spec in `workspace/files/emnist/PLAN.md` (source plan uses coarser numbering up to Stage 8; the agent's own plan in `workspace/research/state.md` breaks this into 7 items).
 
 ### What exists in the mnist repo that does not exist in triptych (✅ verified by diff)
 
-**Three new display addons** (`C:/Users/aquin/mnist/displays/`):
+**Three new display addons** (`~/mnist/displays/`):
 - `optuna.py` — embeds Optuna Dashboard as an iframe in a display tab, auto-manages the subprocess via `scripts/optuna_server.py`, clamps iframe `min-width: 1400px` because the dashboard is desktop-optimized
 - `architecture.py` — "What the AI has built" visualization; scans `workspace/files/` with Python AST, renders folder-grouped module cards with click-to-focus
 - `_graph.py` — shared helper; injects `window.TriptychGraph` with a Sugiyama layered layout used by both `research.py` and `architecture.py`
@@ -70,7 +70,7 @@ Quinn cloned Triptych to `C:/Users/aquin/mnist/` (same initial commit as the bas
 
 **Workspace output** (`workspace/output/`): 12 files (✅ counted) — 7 HTML tabs (`research.html`, `architecture.html`, `stage6.html`, `stage6_push.html`, `mnist-history.html`, `emnist-history.html`, `optuna_emnist.html`), 1 JSON data file (`arch-graph.json`), 3 logs (`finish_stage6.log`, `republish_loop.log`, `stage7_train.log`), and 1 **misplaced Python source file** (`progress_stage6.py`) that shouldn't be in an output directory at all.
 
-**Uncommitted**. `C:/Users/aquin/mnist/` has zero trial commits — all of the above is untracked in the working tree. Meta-risk: if Quinn's machine dies, Trial 1 evaporates. Process finding: future trials should include a "commit at checkpoint" discipline, or Triptych should auto-snapshot trial state.
+**Uncommitted**. `~/mnist/` has zero trial commits — all of the above is untracked in the working tree. Meta-risk: if Quinn's machine dies, Trial 1 evaporates. Process finding: future trials should include a "commit at checkpoint" discipline, or Triptych should auto-snapshot trial state.
 
 ### The graph at the end of Trial 1
 
@@ -453,7 +453,7 @@ Full named catalogue is in `ecosystem-scan.md`. Key positioning takeaways for Tr
 - `docs/internal/PRD.md` (language update if status semantics change)
 
 **Trial 1 artifacts (for reference, uncommitted — back them up before touching):**
-- `C:/Users/aquin/mnist/` — full trial working tree
+- `~/mnist/` — full trial working tree
 - Key files: `core/research.py` (+157), `core/verify.py` (+36), `core/optuna_helper.py` (new), `displays/optuna.py`, `displays/architecture.py`, `displays/_graph.py`, `displays/research.py` (rewrite), 7 scripts in `scripts/`
 
 ---
@@ -465,7 +465,7 @@ Full named catalogue is in `ecosystem-scan.md`. Key positioning takeaways for Tr
 | 6 "verified" results came from backfill, not verifier | Read `scripts/backfill_mnist_plan.py`; no `workspace/research/verification.log` exists in mnist |
 | Tab-state bug is in `activeStem = active.stem` | Read `core/default-display.html:228–232` with surrounding context |
 | Server sorts by `firstSeen` not mtime | Read `server/index.ts:133–144` |
-| 12 output files, incl. misplaced `progress_stage6.py` | `ls C:/Users/aquin/mnist/workspace/output/` |
+| 12 output files, incl. misplaced `progress_stage6.py` | `ls ~/mnist/workspace/output/` |
 | Dependency graph is a chain, not DAG | Read `deps.json`: 11 edges, linear topology |
 | Schema extension to 8 fields | `core/research.py:10` comment in mnist |
 | PRD-stated field count | `docs/internal/PRD.md` §Research State |

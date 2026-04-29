@@ -219,7 +219,9 @@
         return;
       }
       const add = e.target.closest('.tab-add');
-      if (add) handleTabAdd(panel);
+      if (add) { handleTabAdd(panel); return; }
+      const action = e.target.closest('.tab-action');
+      if (action) handleTabAction(panel, action.dataset.action);
     });
   });
 
@@ -257,6 +259,11 @@
     else if (name === 'terminal') wsSend({ type: 'session-create' });
   }
 
+  function handleTabAction(panel, action) {
+    const name = panel.dataset.panel;
+    if (name === 'workspace' && action === 'watch') openWorkspaceWatch();
+  }
+
   /* ── Workspace multi-tab ─────────────────────────────── */
   // openTabs[id] = { id, kind: 'fm'|'file', workspace, file, name }
   const wsPanel = panels[0];
@@ -271,7 +278,10 @@
   }
 
   function ensureWorkspaceTab({ kind, workspace, file, name }) {
-    const id = kind === 'fm' ? 'ws-fm' : tabIdForFile(workspace, file);
+    let id;
+    if (kind === 'fm') id = 'ws-fm';
+    else if (kind === 'watch') id = 'ws-watch';
+    else id = tabIdForFile(workspace, file);
     if (openTabs.has(id)) return id;
 
     const tabEl = makeTabEl({ id, name, closeable: true, kind });
@@ -283,7 +293,9 @@
     const iframe = document.createElement('iframe');
     iframe.className = 'panel-frame';
     iframe.title = name;
-    iframe.src = kind === 'fm' ? '/workspaces/files.html' : `/workspaces/${workspace}.html?file=${encodeURIComponent(file)}`;
+    if (kind === 'fm') iframe.src = '/workspaces/files.html';
+    else if (kind === 'watch') iframe.src = '/workspaces/watch.html';
+    else iframe.src = `/workspaces/${workspace}.html?file=${encodeURIComponent(file)}`;
     view.appendChild(iframe);
     wsContent.appendChild(view);
     bindIframeShortcuts(iframe);
@@ -325,17 +337,28 @@
     activateWorkspaceTab(id);
   }
 
+  function openWorkspaceWatch() {
+    // Watch lives in the workspace pane (the user picks a window; the agent
+    // reads the snapshots). Singleton tab — re-clicking just activates.
+    if (openTabs.has('ws-watch')) { activateWorkspaceTab('ws-watch'); return; }
+    const id = ensureWorkspaceTab({ kind: 'watch', name: 'Watch' });
+    activateWorkspaceTab(id);
+  }
+
   function openWorkspaceFile(workspace, file) {
     const newId = tabIdForFile(workspace, file);
     const newName = file ? file.split('/').pop() : workspace;
     // Already open → just activate
     if (openTabs.has(newId)) { activateWorkspaceTab(newId); return; }
-    // If there's an active workspace tab, REPLACE it (browser-style: click a
-    // file in the Files browser → Files tab transforms into the file tab).
-    // For a separate tab, the user hits the + button first.
+    // If there's an active workspace tab AND it's a file/fm tab, REPLACE it
+    // (browser-style: click a file in the Files browser → Files tab transforms
+    // into the file tab). Don't replace singleton action tabs (watch).
     if (activeWsId && openTabs.has(activeWsId)) {
-      replaceWorkspaceTab(activeWsId, { kind: 'file', workspace, file, name: newName });
-      return;
+      const active = openTabs.get(activeWsId);
+      if (active.kind === 'fm' || active.kind === 'file') {
+        replaceWorkspaceTab(activeWsId, { kind: 'file', workspace, file, name: newName });
+        return;
+      }
     }
     // Otherwise create new
     ensureWorkspaceTab({ kind: 'file', workspace, file, name: newName });
