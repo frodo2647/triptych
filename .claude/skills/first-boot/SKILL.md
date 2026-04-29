@@ -15,6 +15,16 @@ On first boot (no `CLAUDE.local.md`): pick Stage 0 or Stage 1 based on the rule 
 
 ---
 
+## Brand-new user — orient them in two sentences (do this once)
+
+If `workspace/.first-run-completed` was just created (look for the `[FIRST-BOOT]` line in the server log, or just check the file's mtime against this session's start), the user is brand-new to Triptych. Before any other work — and inside whichever stage applies — open with **a single short paragraph** that names the three panels and the first-thing-to-try:
+
+> "Triptych has three panels — workspace on the left (you edit there), display in the middle (I render results there), and this terminal in between (we talk here). Try opening a file from the file manager, or just tell me what you want to work on."
+
+That's the whole tour. Don't enumerate skills or commands; people figure those out by asking. The marker is one-shot — don't re-issue this on later sessions.
+
+---
+
 ## Stage 0 — Fast-path (substantive first message)
 
 ### When to use
