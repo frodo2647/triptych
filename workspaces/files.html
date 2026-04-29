@@ -179,6 +179,7 @@
       <button class="preset" data-ext=".tex">LaTeX</button>
       <button class="preset" data-ext=".csv">CSV</button>
       <button class="preset" data-ext=".tldr">Drawing</button>
+      <button class="preset" data-ext=".circuit">Circuit</button>
     </div>
     <input type="text" id="new-filename" placeholder="filename.ext" autocomplete="off" spellcheck="false">
     <div class="dialog-actions">
@@ -201,6 +202,8 @@
     '.png': 'image', '.jpg': 'image', '.jpeg': 'image',
     '.gif': 'image', '.webp': 'image', '.svg': 'image', '.bmp': 'image',
     '.avif': 'image', '.ico': 'image',
+    '.circuit': 'circuitjs',
+    '.gltf': 'threejs-editor', '.glb': 'threejs-editor',
   };
 
   const FILE_TEMPLATES = {
@@ -210,6 +213,7 @@
     '.tex': '\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n',
     '.csv': 'col1,col2,col3\n',
     '.tldr': '{}',
+    '.circuit': '{"share_url": "", "netlist": "", "notes": ""}',
   };
 
   // ── Lucide SVG icons (MIT, lucide.dev). Stroke-based, currentColor. ──
@@ -277,6 +281,9 @@
     '.svg':      ICON.image,
     '.gif':      ICON.image,
     '.webp':     ICON.image,
+    '.circuit':  ICON.fileCode,
+    '.gltf':     ICON.fileCode,
+    '.glb':      ICON.fileCode,
   };
   const DEFAULT_ICON = ICON.file;
   const FOLDER_ICON = ICON.folder;
@@ -295,6 +302,7 @@
     '.pdf': 'pdf',
     '.tex': 'math',
     '.tldr': 'sketch',
+    '.circuit': 'web', '.gltf': 'image', '.glb': 'image',
   };
 
   const listEl = document.getElementById('file-list');

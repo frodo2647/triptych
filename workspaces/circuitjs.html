@@ -16,19 +16,21 @@
       font-size: 11px; color: var(--text-mid);
     }
     #bar .title { color: var(--text-hi); font-weight: 500; }
+    #bar .file-name { color: var(--accent); font-family: var(--font-mono, monospace); font-size: 11px; }
     #bar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
     #bar .dot.ok { background: var(--accent); }
+    #bar .save-btn {
+      background: none; border: 1px solid var(--border); color: var(--text-2);
+      font-family: var(--font); font-size: 10px;
+      padding: 3px 10px; border-radius: 3px; cursor: pointer;
+      transition: all 0.15s;
+    }
+    #bar .save-btn:hover { color: var(--text); border-color: var(--text-3); }
+    #bar .save-btn.dirty { color: var(--accent); border-color: var(--accent); }
     #bar .note { margin-left: auto; color: var(--text-dim); }
     #bar a { color: var(--text-mid); text-decoration: none; border-bottom: 1px dotted var(--text-dim); }
     #bar a:hover { color: var(--text-hi); }
     #frame { flex: 1; width: 100%; border: none; background: #fff; }
-    #overlay {
-      position: absolute; inset: 30px 0 0 0;
-      display: flex; align-items: center; justify-content: center;
-      background: var(--void); color: var(--text-mid); font-size: 13px;
-      pointer-events: none; opacity: 1; transition: opacity 0.3s ease;
-    }
-    #overlay.hidden { opacity: 0; }
   </style>
 </head>
 <body>
@@ -36,78 +38,122 @@
     <div id="bar">
       <span class="dot" id="status-dot"></span>
       <span class="title">CircuitJS</span>
-      <span id="status-text">loading remote iframe…</span>
+      <span class="file-name" id="file-name"></span>
+      <button class="save-btn" id="save-btn" style="display:none">Save</button>
       <span class="note">hosted by <a href="https://www.falstad.com/circuit/" target="_blank" rel="noopener">falstad.com</a></span>
     </div>
-    <iframe id="frame" src="https://www.falstad.com/circuit/circuitjs.html"></iframe>
-    <div id="overlay">connecting to falstad.com…</div>
+    <iframe id="frame" src="about:blank"></iframe>
   </div>
 
   <script src="/core/capture.js"></script>
   <script>
-    // Same-origin postMessage bridge to the Falstad iframe. Falstad exposes a
-    // small command vocabulary we can use to read/write the circuit, run the
-    // simulator, and export waveform data. Details on the command set vary
-    // across Falstad forks; we keep the shape generic and surface whatever
-    // the upstream supports. If a command isn't recognized, we just log it.
+    // Loads a .circuit file (small JSON envelope) when ?file=path is provided,
+    // otherwise opens a bare Falstad iframe. Save serialises share_url +
+    // notes back to the file.
     //
-    // This file is the workspace side. A paired Python-side integration
-    // lives in integrations/circuitjs.py; a display addon lives in
-    // displays/circuitjs.py.
-
+    // .circuit format:
+    //   { "share_url": "<full Falstad share URL>",
+    //     "netlist":   "<raw Falstad text netlist>",
+    //     "notes":     "<freeform notes>" }
+    //
+    // share_url wins if present; otherwise netlist; otherwise default Falstad.
     (function () {
+      var FALSTAD_BASE = 'https://www.falstad.com/circuit/circuitjs.html';
       var FALSTAD_ORIGIN = 'https://www.falstad.com';
+
       var frame = document.getElementById('frame');
       var statusDot = document.getElementById('status-dot');
-      var statusText = document.getElementById('status-text');
-      var overlay = document.getElementById('overlay');
-      var frameReady = false;
+      var saveBtn = document.getElementById('save-btn');
+      var fileNameEl = document.getElementById('file-name');
+
+      var params = new URLSearchParams(location.search);
+      var filePath = params.get('file');
+      var fileData = { share_url: '', netlist: '', notes: '' };
+
+      function buildFrameUrl(data) {
+        // share_url takes precedence
+        if (data.share_url && data.share_url.trim()) {
+          return data.share_url.trim();
+        }
+        if (data.netlist && data.netlist.trim()) {
+          return FALSTAD_BASE + '?cct=' + encodeURIComponent(data.netlist.trim());
+        }
+        // Fall through to query-string options the workspace launcher may pass
+        var p = new URLSearchParams();
+        if (params.get('cct')) p.set('cct', params.get('cct'));
+        if (params.get('ctz')) p.set('ctz', params.get('ctz'));
+        if (params.get('startCircuit')) p.set('startCircuit', params.get('startCircuit'));
+        var qs = p.toString();
+        return qs ? FALSTAD_BASE + '?' + qs : FALSTAD_BASE;
+      }
+
+      function loadFrame(data) {
+        frame.src = buildFrameUrl(data);
+      }
 
       frame.addEventListener('load', function () {
-        frameReady = true;
         statusDot.classList.add('ok');
-        statusText.textContent = 'ready';
-        overlay.classList.add('hidden');
       });
 
-      // Expose a small bridge on window so the parent (or devtools) can drive
-      // the iframe. These are the four hand-offs the dashboard integration
-      // typically uses.
-      window.TriptychCircuit = {
-        ready: function () { return frameReady; },
-        getCircuit: function () {
-          if (!frameReady) return null;
-          frame.contentWindow.postMessage({ cmd: 'getCircuit' }, FALSTAD_ORIGIN);
-        },
-        setCircuit: function (text) {
-          if (!frameReady) return;
-          frame.contentWindow.postMessage({ cmd: 'setCircuit', text: text }, FALSTAD_ORIGIN);
-        },
-        run: function () {
-          if (!frameReady) return;
-          frame.contentWindow.postMessage({ cmd: 'run' }, FALSTAD_ORIGIN);
-        },
-        exportWaveform: function () {
-          if (!frameReady) return;
-          frame.contentWindow.postMessage({ cmd: 'exportWaveform' }, FALSTAD_ORIGIN);
-        },
-      };
+      // ── File mode ─────────────────────────────────────────────
+      if (filePath) {
+        fileNameEl.textContent = filePath;
+        saveBtn.style.display = 'inline-block';
 
-      // Pass responses back to any listener (currently: browser console).
-      // Write a workspace file if we get a waveform export so Python can pick
-      // it up. Route through Triptych's capture endpoint once that's wired.
-      window.addEventListener('message', function (ev) {
-        if (!ev || !ev.data) return;
-        // Only trust the Falstad iframe. Anything else posting to this window
-        // is ignored — matters once the POST-to-/api/files path is wired.
-        if (ev.origin !== FALSTAD_ORIGIN) return;
-        if (ev.data.cmd === 'waveform' && ev.data.payload) {
-          console.log('[circuitjs] waveform received, bytes:',
-            (typeof ev.data.payload === 'string' ? ev.data.payload.length : 0));
-          // Future: POST to /api/files or write via existing capture channel
-          // so integrations/circuitjs.py can pick it up off disk.
-        }
-      });
+        fetch('/api/files/files/' + filePath.split('/').map(encodeURIComponent).join('/'))
+          .then(function (r) { return r.text(); })
+          .then(function (text) {
+            try {
+              fileData = Object.assign({ share_url: '', netlist: '', notes: '' },
+                                       JSON.parse(text || '{}'));
+            } catch (e) {
+              console.warn('[circuitjs] could not parse', filePath, e);
+            }
+            loadFrame(fileData);
+          })
+          .catch(function (err) {
+            console.warn('[circuitjs] failed to load', filePath, err);
+            loadFrame({});
+          });
+
+        saveBtn.addEventListener('click', function () {
+          var url = window.prompt(
+            'Paste Falstad share URL (File → Export Link → Copy to Clipboard).\n' +
+            'Leave blank to keep current.',
+            fileData.share_url || ''
+          );
+          if (url === null) return;
+          if (url.trim()) fileData.share_url = url.trim();
+          var text = JSON.stringify(fileData, null, 2);
+          fetch('/api/files/files/' + filePath.split('/').map(encodeURIComponent).join('/'), {
+            method: 'PUT',
+            body: text,
+            headers: { 'Content-Type': 'application/json' },
+          }).then(function (r) {
+            if (r.ok) {
+              saveBtn.classList.remove('dirty');
+              saveBtn.textContent = 'Saved';
+              setTimeout(function () { saveBtn.textContent = 'Save'; }, 1200);
+              if (fileData.share_url) loadFrame(fileData);
+            } else {
+              alert('Save failed: ' + r.status);
+            }
+          });
+        });
+      } else {
+        // Stand-alone mode (Files → Tools button or direct workspace open)
+        loadFrame({});
+      }
+
+      // ── Capture for agent visibility ──────────────────────────
+      if (typeof Capture !== 'undefined') {
+        Capture.init({
+          interval: 30000,
+          getContext: function () {
+            return { workspace: 'circuitjs', file: filePath || null };
+          },
+        });
+      }
     })();
   </script>
 </body>
