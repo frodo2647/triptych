@@ -180,6 +180,8 @@
       <button class="preset" data-ext=".csv">CSV</button>
       <button class="preset" data-ext=".tldr">Drawing</button>
       <button class="preset" data-ext=".circuit">Circuit</button>
+      <button class="preset" data-ext=".svg">SVG</button>
+      <button class="preset" data-ext=".glb">3D Scene</button>
     </div>
     <input type="text" id="new-filename" placeholder="filename.ext" autocomplete="off" spellcheck="false">
     <div class="dialog-actions">
@@ -214,6 +216,15 @@
     '.csv': 'col1,col2,col3\n',
     '.tldr': '{}',
     '.circuit': '{"share_url": "", "netlist": "", "notes": ""}',
+    '.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120" viewBox="0 0 200 120">\n  <rect x="10" y="10" width="180" height="100" fill="none" stroke="#333" stroke-width="2"/>\n  <text x="100" y="65" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#333">untitled</text>\n</svg>\n',
+  };
+
+  // Binary templates — base64-encoded payloads. createFile() decodes these
+  // and PUTs as Uint8Array bytes instead of as a UTF-8 string.
+  // .glb here is a 1KB pygltflib-generated unit cube (light blue PBR
+  // material) so a fresh "3D Scene" file opens with something visible.
+  const FILE_TEMPLATES_BINARY = {
+    '.glb': 'Z2xURgIAAADsAwAAKAMAAEpTT057ImFjY2Vzc29ycyI6W3siYnVmZmVyVmlldyI6MCwiYnl0ZU9mZnNldCI6MCwiY29tcG9uZW50VHlwZSI6NTEyNiwibm9ybWFsaXplZCI6ZmFsc2UsImNvdW50Ijo4LCJ0eXBlIjoiVkVDMyIsIm1heCI6WzAuNSwwLjUsMC41XSwibWluIjpbLTAuNSwtMC41LC0wLjVdfSx7ImJ1ZmZlclZpZXciOjEsImJ5dGVPZmZzZXQiOjAsImNvbXBvbmVudFR5cGUiOjUxMjMsIm5vcm1hbGl6ZWQiOmZhbHNlLCJjb3VudCI6MzYsInR5cGUiOiJTQ0FMQVIifV0sImFzc2V0Ijp7ImdlbmVyYXRvciI6InB5Z2x0ZmxpYkB2MS4xNi41IiwidmVyc2lvbiI6IjIuMCJ9LCJidWZmZXJWaWV3cyI6W3siYnVmZmVyIjowLCJieXRlT2Zmc2V0IjowLCJieXRlTGVuZ3RoIjo5NiwidGFyZ2V0IjozNDk2Mn0seyJidWZmZXIiOjAsImJ5dGVPZmZzZXQiOjk2LCJieXRlTGVuZ3RoIjo3MiwidGFyZ2V0IjozNDk2M31dLCJidWZmZXJzIjpbeyJieXRlTGVuZ3RoIjoxNjh9XSwibWF0ZXJpYWxzIjpbeyJwYnJNZXRhbGxpY1JvdWdobmVzcyI6eyJiYXNlQ29sb3JGYWN0b3IiOlswLjIsMC42LDAuOTUsMS4wXSwibWV0YWxsaWNGYWN0b3IiOjAuMSwicm91Z2huZXNzRmFjdG9yIjowLjV9LCJlbWlzc2l2ZUZhY3RvciI6WzAuMCwwLjAsMC4wXSwiYWxwaGFNb2RlIjoiT1BBUVVFIiwiZG91YmxlU2lkZWQiOmZhbHNlfV0sIm1lc2hlcyI6W3sicHJpbWl0aXZlcyI6W3siYXR0cmlidXRlcyI6eyJQT1NJVElPTiI6MH0sImluZGljZXMiOjEsIm1vZGUiOjQsIm1hdGVyaWFsIjowfV19XSwibm9kZXMiOlt7Im1lc2giOjB9XSwic2NlbmVzIjpbeyJub2RlcyI6WzBdfV19qAAAAEJJTgAAAAC/AAAAvwAAAL8AAAA/AAAAvwAAAL8AAAA/AAAAPwAAAL8AAAC/AAAAPwAAAL8AAAC/AAAAvwAAAD8AAAA/AAAAvwAAAD8AAAA/AAAAPwAAAD8AAAC/AAAAPwAAAD8AAAIAAQAAAAMAAgAEAAUABgAEAAYABwAAAAQABwAAAAcAAwABAAIABgABAAYABQADAAcABgADAAYAAgAAAAEABQAAAAUABAA=',
   };
 
   // ── Lucide SVG icons (MIT, lucide.dev). Stroke-based, currentColor. ──
@@ -569,15 +580,30 @@
     if (!name) return;
 
     const ext = getExt(name);
-    const template = FILE_TEMPLATES[ext] || '';
     const here = currentPath();
     const path = here ? here + '/' + name : name;
+    const url = `/api/files/files/${path.split('/').map(encodeURIComponent).join('/')}`;
 
-    await fetch(`/api/files/files/${path.split('/').map(encodeURIComponent).join('/')}`, {
-      method: 'PUT',
-      body: template,
-      headers: { 'Content-Type': 'text/plain' },
-    });
+    // Binary template (e.g. .glb) — decode base64 to bytes and PUT as
+    // application/octet-stream so the server stores the raw bytes
+    // unmodified. Text templates use text/plain.
+    if (FILE_TEMPLATES_BINARY[ext]) {
+      const bin = atob(FILE_TEMPLATES_BINARY[ext]);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      await fetch(url, {
+        method: 'PUT',
+        body: bytes,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+    } else {
+      const template = FILE_TEMPLATES[ext] || '';
+      await fetch(url, {
+        method: 'PUT',
+        body: template,
+        headers: { 'Content-Type': 'text/plain' },
+      });
+    }
 
     dialog.classList.remove('active');
     openFile(path);
